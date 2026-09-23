@@ -90,12 +90,23 @@ Stremio client
 ## Components
 
 ### ID resolver
-Normalizes whatever id Stremio sends (`kitsu:`, `mal:`, `tt…`, `anidb:`,
-etc.) into an AniList id (for Jimaku) and an AniDB id (for AnimeTosho).
-Backed by a bundled, periodically-refreshed copy of a public anime
-cross-reference dataset (manami-project/anime-offline-database or
-equivalent), loaded into SQLite at startup/refresh for fast lookup — no
-live network dependency on the request path.
+Normalizes whatever id Stremio sends (`kitsu:`, `mal:`, `anidb:`, etc.)
+into an AniList id (for Jimaku) and an AniDB id (for AnimeTosho). Backed
+by a periodically-refreshed local copy of
+`manami-project/anime-offline-database` (~41k anime, each entry's
+`sources[]` array containing per-scheme URLs like
+`anilist.co/anime/{id}`, `anidb.net/anime/{id}`, `kitsu.app/anime/{id}`,
+`myanimelist.net/anime/{id}`), parsed once into a SQLite lookup table
+indexed by each id scheme — no live network dependency on the request
+path.
+
+**Confirmed scope limitation:** this dataset has no IMDb mapping at all.
+A bare `tt…` id with no dataset match is unresolvable in v1 — the
+handler returns an empty subtitle list rather than erroring. This is
+expected to be uncommon in practice: an IMDb-only anime setup is exactly
+the "poor anime coverage" problem this project exists to work around, so
+anime-focused metadata addons (like AIOMetadata configured for anime)
+typically surface Kitsu/MAL ids instead.
 
 ### Jimaku provider (tier 1)
 Queries the Jimaku API for the resolved AniList id + episode number,
@@ -124,8 +135,13 @@ live example.
 Runs only when tiers 1–2 return nothing:
 1. Calls the user's configured stream addon (`STREAM_ADDON_URL`, e.g.
    their AIOStreams manifest URL) for this content id, and takes the
-   first stream in its response (respecting whatever ranking the
-   upstream addon already applied).
+   first **directly playable** stream in its response (a `url` field —
+   the normal shape for a debrid-resolved stream) — respecting whatever
+   ranking the upstream addon already applied. Entries that only carry
+   an `infoHash` (a raw, not-yet-resolved torrent/magnet) are skipped,
+   since resolving one ourselves is out of scope; this is expected to be
+   rare for a debrid-backed setup, where AIOStreams already hands back
+   direct HTTP links.
 2. Runs `ffprobe` against the stream URL to find a subtitle stream
    matching the target language. If none exists, cache a negative result
    and stop.

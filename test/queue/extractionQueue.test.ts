@@ -3,12 +3,10 @@ import { ExtractionQueue } from '../../src/queue/extractionQueue.js';
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
-  let reject!: (err: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
+  const promise = new Promise<T>((res) => {
     resolve = res;
-    reject = rej;
   });
-  return { promise, resolve, reject };
+  return { promise, resolve };
 }
 
 describe('ExtractionQueue', () => {

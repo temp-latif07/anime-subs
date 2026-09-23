@@ -13,4 +13,10 @@ describe('decompressXz', () => {
   it('rejects when given non-xz data', async () => {
     await expect(decompressXz(Buffer.from('not xz data'))).rejects.toThrow(/exited with code/);
   });
+
+  it('throws on timeout', async () => {
+    const original = Buffer.from('[Script Info]\nTitle: test subtitle\n');
+    const compressed = execFileSync('xz', ['-c'], { input: original });
+    await expect(decompressXz(compressed, 1)).rejects.toThrow(/timed out/);
+  });
 });

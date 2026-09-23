@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { AnimeDataset } from '../../src/resolver/animeDataset.js';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { AnimeDataset, downloadDataset } from '../../src/resolver/animeDataset.js';
 
 const sampleRaw = {
   data: [
@@ -39,5 +41,38 @@ describe('AnimeDataset', () => {
 
   it('builds successfully even when some entries have no mappable ids', () => {
     expect(() => AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'))).not.toThrow();
+  });
+});
+
+describe('downloadDataset', () => {
+  it('downloads and parses dataset from a custom URL', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(sampleRaw));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const data = await downloadDataset(`http://127.0.0.1:${port}/dataset.json`);
+      expect(data).toEqual(sampleRaw);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('throws Error when response is not ok', async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(500);
+      res.end('Internal Server Error');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      await expect(downloadDataset(`http://127.0.0.1:${port}/dataset.json`)).rejects.toThrow('Failed to download anime dataset: HTTP 500');
+    } finally {
+      server.close();
+    }
   });
 });

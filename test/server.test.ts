@@ -55,6 +55,7 @@ describe('HTTP contract', () => {
   it('serves a manifest with the fields Stremio requires', async () => {
     const res = await fetch(`${baseUrl}/manifest.json`);
     expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
     expect(await res.json()).toMatchObject({ id: 'org.animesubs', resources: ['subtitles'], types: ['series'] });
   });
 
@@ -68,6 +69,7 @@ describe('HTTP contract', () => {
     cache.setReady({ anilistId: 154587, episode: 5, lang: 'eng' }, 2, 'WEBVTT\n\n1\nhello');
     const res = await fetch(`${baseUrl}/vtt/154587/5/eng.vtt`);
     expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
     expect(res.headers.get('content-type')).toContain('text/vtt');
     expect(await res.text()).toContain('hello');
   });

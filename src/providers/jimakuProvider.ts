@@ -4,7 +4,7 @@ import type { ProviderResult } from '../types.js';
 
 interface JimakuEntry {
   id: number;
-  flags: { anime: boolean; adult: boolean };
+  flags?: { anime: boolean; adult: boolean };
 }
 
 interface JimakuFile {
@@ -51,7 +51,7 @@ export async function findJimakuSubtitle(
     `${baseUrl}/api/entries/search?anilist_id=${anilistId}`,
     { headers: { Authorization: apiKey }, timeoutMs },
   );
-  const entry = entries.find((e) => e.flags.anime && !e.flags.adult);
+  const entry = entries.find((e) => e.flags?.anime && !e.flags?.adult);
   if (!entry) return { found: false };
 
   const files = await fetchJson<JimakuFile[]>(

@@ -78,8 +78,9 @@ export class AnimeDataset {
   }
 }
 
-export async function downloadDataset(): Promise<RawDataset> {
-  const url = 'https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json';
+export async function downloadDataset(
+  url = 'https://github.com/manami-project/anime-offline-database/releases/latest/download/anime-offline-database-minified.json',
+): Promise<RawDataset> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to download anime dataset: HTTP ${res.status}`);
   return (await res.json()) as RawDataset;

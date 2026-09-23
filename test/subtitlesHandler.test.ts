@@ -8,6 +8,7 @@ import { CacheStore } from '../src/cache/cacheStore.js';
 import { ExtractionQueue } from '../src/queue/extractionQueue.js';
 import { handleSubtitlesRequest, type SubtitlesHandlerDeps } from '../src/subtitlesHandler.js';
 import type { Config } from '../src/config.js';
+import type { ProviderResult } from '../src/types.js';
 
 const dataset = AnimeDataset.buildFromRaw({
   data: [{ sources: ['https://anidb.net/anime/17617', 'https://anilist.co/anime/154587', 'https://kitsu.app/anime/46474'] }],
@@ -63,8 +64,8 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('starts a background extraction and returns a placeholder entry when tiers 1-2 find nothing', async () => {
-    let resolveExtraction!: (r: { found: boolean; vttContent?: string }) => void;
-    deps.extractionProvider = vi.fn(() => new Promise((resolve) => { resolveExtraction = resolve; }));
+    let resolveExtraction!: (r: ProviderResult) => void;
+    deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>((resolve) => { resolveExtraction = resolve; }));
 
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toHaveLength(1);
@@ -76,7 +77,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('does not start a second extraction job while one is already in flight', async () => {
-    deps.extractionProvider = vi.fn(() => new Promise(() => {}));
+    deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
     await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(deps.extractionProvider).toHaveBeenCalledTimes(1);
@@ -150,7 +151,7 @@ describe('handleSubtitlesRequest', () => {
       return { found: false };
     });
     deps.animetoshoProvider = vi.fn(async () => ({ found: false }));
-    deps.extractionProvider = vi.fn(() => new Promise(() => {}));
+    deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
 
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toHaveLength(2);
@@ -158,5 +159,21 @@ describe('handleSubtitlesRequest', () => {
       { lang: 'eng', url: 'https://addon.example.com/vtt/154587/5/eng.vtt' },
       { lang: 'spa', url: 'https://addon.example.com/vtt/154587/5/spa.vtt' },
     ]);
+  });
+
+  it('processes multiple configured languages concurrently', async () => {
+    deps.config = { ...baseConfig, subtitleLanguages: ['eng', 'spa'] };
+    const started: string[] = [];
+    deps.jimakuProvider = vi.fn((_anilistId, _episode, lang) => {
+      started.push(lang);
+      return new Promise<ProviderResult>((resolve) => setTimeout(() => resolve({ found: false }), 20));
+    });
+    deps.animetoshoProvider = vi.fn(async () => ({ found: false }));
+    deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
+
+    const promise = handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(started).toEqual(['eng', 'spa']);
+    await promise;
   });
 });

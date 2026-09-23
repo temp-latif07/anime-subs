@@ -30,12 +30,14 @@ export async function handleSubtitlesRequest(
   if (ids.anilistId === null) return { subtitles: [] };
   const anilistId = ids.anilistId;
 
-  const subtitles: SubtitleCandidate[] = [];
-  for (const lang of deps.config.subtitleLanguages) {
-    const key: CacheKey = { anilistId, episode: parsed.episode, lang };
-    const included = await resolveOneLanguage(key, ids.anidbId, parsed, deps);
-    if (included) subtitles.push({ lang, url: deps.buildSubtitleUrl(key) });
-  }
+  const results = await Promise.all(
+    deps.config.subtitleLanguages.map(async (lang) => {
+      const key: CacheKey = { anilistId, episode: parsed.episode, lang };
+      const included = await resolveOneLanguage(key, ids.anidbId, parsed, deps);
+      return included ? { lang, url: deps.buildSubtitleUrl(key) } : null;
+    }),
+  );
+  const subtitles = results.filter((s): s is SubtitleCandidate => s !== null);
   return { subtitles };
 }
 

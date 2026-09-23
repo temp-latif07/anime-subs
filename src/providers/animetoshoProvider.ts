@@ -18,7 +18,7 @@ interface ToshoAttachment {
 
 interface ToshoFile {
   filename: string;
-  attachments: ToshoAttachment[];
+  attachments?: ToshoAttachment[];
 }
 
 interface ToshoTorrentDetail {
@@ -30,7 +30,6 @@ const EPISODE_PATTERNS = [
   /-\s*(\d{1,4})\s*\(/,
   /-\s*(\d{1,4})\s*\[/,
   /-\s*(\d{1,4})(?:\.[a-z0-9]+)?\s*$/i,
-  /-\s*(\d{1,4})\s*$/,
 ];
 
 function parseEpisodeNumber(title: string): number | null {
@@ -89,7 +88,7 @@ export async function findAnimeToshoSubtitle(
     if (!detail.files) continue;
 
     for (const file of detail.files) {
-      const attachment = file.attachments.find(
+      const attachment = file.attachments?.find(
         (a) => a.type === 'subtitle' && a.info?.lang === lang,
       );
       if (!attachment?.info?.codec || attachment.info.tracknum === undefined) continue;

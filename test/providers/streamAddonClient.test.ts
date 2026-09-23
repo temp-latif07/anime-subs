@@ -27,10 +27,11 @@ describe('getBestStreamUrl', () => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({}));
       } else if (req.url === '/stream/series/kitsu:50350:1:5.json') {
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ streams: [{ url: 'https://debrid.example.com/direct/slow.mkv' }] }));
         }, 100);
+        res.on('close', () => clearTimeout(timer));
       } else {
         res.writeHead(404);
         res.end();

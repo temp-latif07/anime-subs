@@ -4,3 +4,5 @@ dist
 *.db
 data
 .git
+.superpowers
+test

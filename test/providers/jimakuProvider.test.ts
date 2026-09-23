@@ -42,12 +42,20 @@ describe('findJimakuSubtitle', () => {
         res.end(JSON.stringify([
           { name: 'Show - 07 [English].ass', url: `${baseUrl}/files/english.ass` },
         ]));
+      } else if (url.pathname === '/api/entries/1/files' && url.searchParams.get('episode') === '8') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([
+          { name: 'Show - 08 [English].srt', url: `${baseUrl}/files/mislabeled-japanese.srt` },
+        ]));
       } else if (url.pathname === '/api/entries/1/files') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify([]));
       } else if (url.pathname === '/files/english.srt') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end('1\n00:00:00,000 --> 00:00:01,000\nJimaku fixture line\n');
+      } else if (url.pathname === '/files/mislabeled-japanese.srt') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('1\n00:00:00,000 --> 00:00:01,000\nこれは日本語の字幕です。英語はありません。\n');
       } else if (url.pathname === '/files/english.vtt') {
         res.writeHead(200, { 'Content-Type': 'text/vtt' });
         res.end('WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nJimaku direct vtt line\n');
@@ -116,4 +124,10 @@ describe('findJimakuSubtitle', () => {
     const result = await findJimakuSubtitle(154587, 5, 'fra', 'test-key', { baseUrl });
     expect(result.found).toBe(false);
   });
+
+  it('rejects a subtitle file that is predominantly Japanese even if filename matched', async () => {
+    const result = await findJimakuSubtitle(154587, 8, 'eng', 'test-key', { baseUrl });
+    expect(result.found).toBe(false);
+  });
 });
+

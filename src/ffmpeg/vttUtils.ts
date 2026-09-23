@@ -123,3 +123,21 @@ export function normalizeVtt(vtt: string, targetLang = 'eng'): string {
 
   return result.join('\n');
 }
+
+export function isAcceptableSubtitle(vtt: string, targetLang: string): boolean {
+  if (!vtt || typeof vtt !== 'string') return false;
+  if (targetLang !== 'eng') return vtt.includes('-->');
+
+  const latinMatches = vtt.match(/[a-zA-Z]/g);
+  const latinCount = latinMatches ? latinMatches.length : 0;
+  if (latinCount < 20) return false;
+
+  const jpMatches = vtt.match(new RegExp(JAPANESE_CHAR_REGEX.source, 'g'));
+  const jpCount = jpMatches ? jpMatches.length : 0;
+
+  // If Japanese characters are more than 25% of Latin characters, reject
+  if (jpCount > latinCount * 0.25) return false;
+
+  return true;
+}
+

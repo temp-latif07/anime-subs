@@ -8,8 +8,10 @@ describe('findAnimeToshoSubtitle', () => {
   let baseUrl: string;
   let compressedAssSubtitle: Buffer;
   let compressedSrtSubtitle: Buffer;
+  let compressedJpSrtSubtitle: Buffer;
   const expectedAssPath = '/storage/attach/002b205c/%5BGroup%5D%20Show%20-%2005%20(1080p)%20%5BABCD1234%5D_track3.eng.ass.xz';
   const expectedSrtPath = '/storage/attach/00000064/Show%20S01E06_track2.eng.srt.xz';
+  const expectedJpSrtPath = '/storage/attach/00000320/Show%20S01E08_track2.eng.srt.xz';
 
   beforeAll(async () => {
     compressedAssSubtitle = execFileSync('xz', ['-c'], {
@@ -17,6 +19,9 @@ describe('findAnimeToshoSubtitle', () => {
     });
     compressedSrtSubtitle = execFileSync('xz', ['-c'], {
       input: Buffer.from('1\n00:00:00,000 --> 00:00:01,000\nAnimeTosho SRT fixture line\n'),
+    });
+    compressedJpSrtSubtitle = execFileSync('xz', ['-c'], {
+      input: Buffer.from('1\n00:00:00,000 --> 00:00:01,000\nこれは日本語の字幕です。英語はありません。\n'),
     });
 
     server = createServer((req, res) => {
@@ -31,6 +36,7 @@ describe('findAnimeToshoSubtitle', () => {
             { id: 3, title: '[Group] Show - 05 (720p).mkv', status: 'pending', num_files: 1 },
             { id: 4, title: 'Show S01E06.mkv', status: 'complete', num_files: 1 },
             { id: 5, title: '[Group] Show - 07.mkv', status: 'complete', num_files: 1 },
+            { id: 8, title: 'Show S01E08.mkv', status: 'complete', num_files: 1 },
           ]));
         } else {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -67,12 +73,25 @@ describe('findAnimeToshoSubtitle', () => {
             ],
           }],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '8') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: 'Show S01E08.mkv',
+            attachments: [
+              { id: 800, type: 'subtitle', info: { codec: 'SRT', lang: 'eng', tracknum: 2 } },
+            ],
+          }],
+        }));
       } else if (url.pathname === expectedAssPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
       } else if (url.pathname === expectedSrtPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedSrtSubtitle);
+      } else if (url.pathname === expectedJpSrtPath) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedJpSrtSubtitle);
       } else {
         res.writeHead(404);
         res.end();
@@ -126,4 +145,10 @@ describe('findAnimeToshoSubtitle', () => {
     const result = await findAnimeToshoSubtitle(18886, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl, timeoutMs: 5000 });
     expect(result.found).toBe(true);
   });
+
+  it('rejects a subtitle candidate that is predominantly Japanese and returns not found', async () => {
+    const result = await findAnimeToshoSubtitle(18886, 8, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(false);
+  });
 });
+

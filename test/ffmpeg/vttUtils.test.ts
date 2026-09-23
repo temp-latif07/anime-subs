@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeVtt } from '../../src/ffmpeg/vttUtils.js';
+import { normalizeVtt, isAcceptableSubtitle } from '../../src/ffmpeg/vttUtils.js';
 
 describe('normalizeVtt', () => {
   it('normalizes MM:SS.mmm timestamps to HH:MM:SS.mmm and adds cue numbers', () => {
@@ -84,3 +84,44 @@ Goodbye!
     expect(cues.length).toBe(2);
   });
 });
+
+describe('isAcceptableSubtitle', () => {
+  it('validates acceptable subtitles for English', () => {
+    const goodEnglish = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nThis is a normal English dialogue subtitle track.\n`;
+    const pureJapanese = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nこれは日本語の字幕です。英語はありません。\n`;
+    const emptyVtt = `WEBVTT\n\n`;
+
+    expect(isAcceptableSubtitle(goodEnglish, 'eng')).toBe(true);
+    expect(isAcceptableSubtitle(pureJapanese, 'eng')).toBe(false);
+    expect(isAcceptableSubtitle(emptyVtt, 'eng')).toBe(false);
+  });
+
+  it('rejects subtitles with fewer than 20 Latin characters for English', () => {
+    const tooShort = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nHello!\n`;
+    expect(isAcceptableSubtitle(tooShort, 'eng')).toBe(false);
+  });
+
+  it('rejects subtitles where Japanese characters exceed 25% of Latin characters', () => {
+    // 25 Latin letters, 10 Japanese characters -> 10 > 25 * 0.25 (6.25) -> false
+    const mixedPredominantlyJapanese = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nThis is English dialogue. ここにはたくさんの日本語のテキストがあります。\n`;
+    expect(isAcceptableSubtitle(mixedPredominantlyJapanese, 'eng')).toBe(false);
+  });
+
+  it('accepts subtitles where Japanese characters are within 25% of Latin characters', () => {
+    // Over 100 Latin letters with just one Japanese loanword/character
+    const mostlyEnglishWithKanji = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nWelcome to our special presentation of the festival today, everyone enjoy!\n\n2\n00:00:04.000 --> 00:00:06.000\nSensei 先生, please wait for us over here!\n`;
+    expect(isAcceptableSubtitle(mostlyEnglishWithKanji, 'eng')).toBe(true);
+  });
+
+  it('handles non-English target languages by checking for cue timestamps', () => {
+    const validJapanese = `WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nこれは日本語の字幕です。\n`;
+    expect(isAcceptableSubtitle(validJapanese, 'jpn')).toBe(true);
+    expect(isAcceptableSubtitle('WEBVTT\n\n', 'jpn')).toBe(false);
+  });
+
+  it('handles empty or non-string inputs safely', () => {
+    expect(isAcceptableSubtitle('', 'eng')).toBe(false);
+    expect(isAcceptableSubtitle(null as any, 'eng')).toBe(false);
+  });
+});
+

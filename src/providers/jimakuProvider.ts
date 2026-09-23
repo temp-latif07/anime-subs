@@ -1,5 +1,6 @@
 import { fetchJson, fetchBuffer } from '../http/httpClient.js';
 import { convertToVtt } from '../ffmpeg/extract.js';
+import { isAcceptableSubtitle } from '../ffmpeg/vttUtils.js';
 import type { ProviderResult } from '../types.js';
 
 interface JimakuEntry {
@@ -65,6 +66,9 @@ export async function findJimakuSubtitle(
   if (!ext) return { found: false };
 
   const raw = await fetchBuffer(match.url, { timeoutMs });
-  const vttContent = ext === 'vtt' ? raw.toString('utf-8') : await convertToVtt(raw, ext);
+  const vttContent = ext === 'vtt' ? raw.toString('utf-8') : await convertToVtt(raw, ext, lang);
+  if (!isAcceptableSubtitle(vttContent, lang)) {
+    return { found: false };
+  }
   return { found: true, vttContent };
 }

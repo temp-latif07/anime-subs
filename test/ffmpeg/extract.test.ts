@@ -106,6 +106,15 @@ describe('ffmpeg subtitle extraction (real ffmpeg/ffprobe subprocess)', () => {
     expect(vtt).toContain('Standalone ASS conversion');
   });
 
+  it('converts ASS buffer and filters Japanese lines when lang is eng', async () => {
+    const assContent = Buffer.from(
+      '[Script Info]\nTitle: Test\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,Japanese text 日本語\\NEnglish subtitle text\n',
+    );
+    const vtt = await convertToVtt(assContent, 'ass', 'eng');
+    expect(vtt).toContain('English subtitle text');
+    expect(vtt).not.toContain('日本語');
+  });
+
   it('rejects when ffprobe fails on non-existent file', async () => {
     await expect(findSubtitleStreamIndex(join(dir, 'nonexistent.mkv'), 'eng')).rejects.toThrow();
   });

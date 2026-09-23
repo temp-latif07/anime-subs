@@ -1,6 +1,7 @@
 import { fetchJson, fetchBuffer } from '../http/httpClient.js';
 import { decompressXz } from '../ffmpeg/xz.js';
 import { convertToVtt } from '../ffmpeg/extract.js';
+import { isAcceptableSubtitle } from '../ffmpeg/vttUtils.js';
 import type { ProviderResult } from '../types.js';
 
 interface ToshoSearchResult {
@@ -109,7 +110,10 @@ export async function findAnimeToshoSubtitle(
       const decompressed = await decompressXz(compressed);
       const codecLower = attachment.info.codec.toLowerCase();
       const ext = codecLower === 'ass' || codecLower === 'ssa' ? 'ass' : 'srt';
-      const vttContent = await convertToVtt(decompressed, ext);
+      const vttContent = await convertToVtt(decompressed, ext, lang);
+      if (!isAcceptableSubtitle(vttContent, lang)) {
+        continue;
+      }
       return { found: true, vttContent };
     }
   }

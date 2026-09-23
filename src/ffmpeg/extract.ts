@@ -101,10 +101,13 @@ export async function extractSubtitleToVtt(
 export async function convertToVtt(
   inputContent: Buffer,
   inputExt: 'ass' | 'srt',
-  timeoutMs = 30000,
+  timeoutMsOrLang?: number | string,
+  maybeTimeoutMs?: number,
 ): Promise<string> {
+  const targetLang = typeof timeoutMsOrLang === 'string' ? timeoutMsOrLang : undefined;
+  const timeoutMs = typeof timeoutMsOrLang === 'number' ? timeoutMsOrLang : (maybeTimeoutMs ?? 30000);
   if (inputExt === 'ass') {
-    return convertAssToVtt(inputContent.toString('utf-8'));
+    return convertAssToVtt(inputContent.toString('utf-8'), targetLang);
   }
   const dir = mkdtempSync(join(tmpdir(), 'animesubs-convert-'));
   const inPath = join(dir, `in.${inputExt}`);
@@ -112,7 +115,7 @@ export async function convertToVtt(
   try {
     writeFileSync(inPath, inputContent);
     await runFfmpeg(['-v', 'error', '-i', inPath, outPath], timeoutMs);
-    return normalizeVtt(readFileSync(outPath, 'utf-8'));
+    return normalizeVtt(readFileSync(outPath, 'utf-8'), targetLang);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

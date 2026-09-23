@@ -79,7 +79,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": false,
-    "sourceMap": false
+    "sourceMap": false,
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"]
 }
@@ -222,7 +223,7 @@ function requireUrl(env: NodeJS.ProcessEnv, name: string): string {
 
 function requireInt(env: NodeJS.ProcessEnv, name: string, defaultValue: number): number {
   const raw = env[name];
-  if (raw === undefined || raw === '') return defaultValue;
+  if (raw === undefined) return defaultValue;
   const parsed = parseInt(raw, 10);
   if (Number.isNaN(parsed)) {
     throw new Error(`Environment variable ${name} is not a valid integer: ${raw}`);

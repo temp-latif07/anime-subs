@@ -20,7 +20,7 @@ describe('HTTP contract', () => {
     dir = mkdtempSync(join(tmpdir(), 'animesubs-server-'));
     cache = new CacheStore(join(dir, 'cache.db'), join(dir, 'files'));
     const dataset = AnimeDataset.buildFromRaw({
-      data: [{ sources: ['https://anilist.co/anime/154587', 'https://anidb.net/anime/17617'] }],
+      data: [{ sources: ['https://anilist.co/anime/154587', 'https://anidb.net/anime/17617', 'https://kitsu.app/anime/46474'] }],
     }, new Database(':memory:'));
 
     const config: Config = {
@@ -63,6 +63,19 @@ describe('HTTP contract', () => {
     const res = await fetch(`${baseUrl}/subtitles/series/kitsu:999999:1:1.json`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ subtitles: [] });
+  });
+
+  it('returns absolute subtitle URLs when subtitles are available', async () => {
+    cache.setReady({ anilistId: 154587, episode: 1, lang: 'eng' }, 1, 'WEBVTT\n\n1\ntest');
+    const res = await fetch(`${baseUrl}/subtitles/series/kitsu:46474:1:1.json`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string }> };
+    expect(body.subtitles).toHaveLength(1);
+    expect(body.subtitles[0]).toEqual({
+      id: 'eng-1',
+      lang: 'eng',
+      url: `${baseUrl}/vtt/154587/1/eng.vtt`,
+    });
   });
 
   it('serves a cached ready vtt file with the right content type', async () => {

@@ -16,9 +16,22 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
     res.json(manifest);
   });
 
+  app.set('trust proxy', true);
+
   app.get('/subtitles/series/:id.json', async (req, res) => {
     try {
-      res.json(await handleSubtitlesRequest(req.params.id, handlerDeps));
+      const result = await handleSubtitlesRequest(req.params.id, handlerDeps);
+      const host = req.get('host');
+      const protocol = req.protocol;
+      const origin = host ? `${protocol}://${host}` : '';
+      const subtitles = result.subtitles.map((sub, i) => ({
+        id: `${sub.lang}-${i + 1}`,
+        lang: sub.lang,
+        url: sub.url.startsWith('http://') || sub.url.startsWith('https://')
+          ? sub.url
+          : `${origin}${sub.url.startsWith('/') ? '' : '/'}${sub.url}`,
+      }));
+      res.json({ subtitles });
     } catch (err) {
       res.status(500).json({ subtitles: [], error: (err as Error).message });
     }

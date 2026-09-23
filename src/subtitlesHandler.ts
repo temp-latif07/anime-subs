@@ -24,6 +24,7 @@ export interface SubtitlesHandlerDeps {
 export async function handleSubtitlesRequest(
   rawId: string,
   deps: SubtitlesHandlerDeps,
+  mediaType?: string,
 ): Promise<{ subtitles: SubtitleCandidate[] }> {
   const parsed = parseSubtitleRequestId(rawId);
   const ids = resolveIds(parsed.contentId, deps.dataset.current);
@@ -37,7 +38,7 @@ export async function handleSubtitlesRequest(
   const results = await Promise.all(
     deps.config.subtitleLanguages.map(async (lang) => {
       const key: CacheKey = { anilistId, episode: parsed.episode, lang };
-      const included = await resolveOneLanguage(key, ids.anidbId, parsed, deps);
+      const included = await resolveOneLanguage(key, ids.anidbId, parsed, deps, mediaType);
       return included ? { lang, url: deps.buildSubtitleUrl(key) } : null;
     }),
   );
@@ -50,6 +51,7 @@ async function resolveOneLanguage(
   anidbId: number | null,
   parsed: { contentId: string; season: number; episode: number },
   deps: SubtitlesHandlerDeps,
+  mediaType?: string,
 ): Promise<boolean> {
   const cached = deps.cache.get(key);
   if (cached?.status === 'ready') {
@@ -67,7 +69,7 @@ async function resolveOneLanguage(
 
   if (await tryFastTiers(key, anidbId, deps)) return true;
 
-  startExtractionInBackground(key, parsed, deps);
+  startExtractionInBackground(key, parsed, deps, mediaType);
   return true;
 }
 
@@ -111,6 +113,7 @@ function startExtractionInBackground(
   key: CacheKey,
   parsed: { contentId: string; season: number; episode: number },
   deps: SubtitlesHandlerDeps,
+  mediaType?: string,
 ): void {
   if (deps.cache.getInFlight(key)) return;
 
@@ -125,6 +128,7 @@ function startExtractionInBackground(
     queue: deps.queue,
     extractionTimeoutMs: deps.config.extractionTimeoutMs,
     providerTimeoutMs: deps.config.providerTimeoutMs,
+    mediaType,
   })
     .then((result) => {
       if (result.found && result.vttContent) {

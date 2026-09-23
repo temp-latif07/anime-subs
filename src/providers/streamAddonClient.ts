@@ -22,7 +22,7 @@ export async function getPlayableStreamUrls(
   contentId: string,
   season: number,
   episode: number,
-  opts: { timeoutMs?: number; maxCandidates?: number } = {},
+  opts: { timeoutMs?: number; maxCandidates?: number; mediaType?: string } = {},
 ): Promise<string[]> {
   const base = streamAddonManifestUrl.replace(/\/manifest\.json\/?$/, '').replace(/\/+$/, '');
   const timeoutMs = opts.timeoutMs ?? 8000;
@@ -33,30 +33,51 @@ export async function getPlayableStreamUrls(
   if (cached && cached.expiresAt > Date.now()) {
     return cached.urls.slice(0, maxCandidates);
   }
+
+  const types = opts.mediaType === 'anime'
+    ? ['anime', 'series']
+    : ['series', 'anime'];
+
   const requestIds = contentId.startsWith('tt')
     ? [`${contentId}:${season}:${episode}`]
     : [`${contentId}:${episode}`, `${contentId}:${season}:${episode}`];
 
-  for (const requestId of requestIds) {
-    for (const type of ['series', 'anime']) {
-      try {
-        const url = `${base}/stream/${type}/${requestId}.json`;
-        const response = await fetchJson<StreamResponse>(url, { timeoutMs });
-        const streams = Array.isArray(response?.streams) ? response.streams : [];
-        const playable = streams
-          .filter((s): s is StremioStream & { url: string } => typeof s.url === 'string' && s.url.length > 0)
-          .map((s) => s.url);
-        if (playable.length > 0) {
-          const candidates = playable.slice(0, 10);
-          streamUrlCache.set(cacheKey, { urls: candidates, expiresAt: Date.now() + 5 * 60 * 1000 });
-          return candidates.slice(0, maxCandidates);
-        }
-      } catch (err) {
-        if (err instanceof HttpTimeoutError) throw err;
-        // try next endpoint variant
-      }
+  const candidateUrls: string[] = [];
+  for (const type of types) {
+    for (const requestId of requestIds) {
+      candidateUrls.push(`${base}/stream/${type}/${requestId}.json`);
     }
   }
+
+  const queries = candidateUrls.map(async (url, idx) => {
+    try {
+      const response = await fetchJson<StreamResponse>(url, { timeoutMs });
+      const streams = Array.isArray(response?.streams) ? response.streams : [];
+      const playable = streams
+        .filter((s): s is StremioStream & { url: string } => typeof s.url === 'string' && s.url.length > 0)
+        .map((s) => s.url);
+      return { idx, playable, error: null };
+    } catch (err) {
+      return { idx, playable: [], error: err };
+    }
+  });
+
+  const results = await Promise.all(queries);
+  results.sort((a, b) => a.idx - b.idx);
+
+  for (const res of results) {
+    if (res.playable.length > 0) {
+      const candidates = res.playable.slice(0, 10);
+      streamUrlCache.set(cacheKey, { urls: candidates, expiresAt: Date.now() + 5 * 60 * 1000 });
+      return candidates.slice(0, maxCandidates);
+    }
+  }
+
+  const timeoutErr = results.find((r) => r.error instanceof HttpTimeoutError);
+  if (timeoutErr?.error) {
+    throw timeoutErr.error;
+  }
+
   return [];
 }
 
@@ -65,7 +86,7 @@ export async function getBestStreamUrl(
   contentId: string,
   season: number,
   episode: number,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; mediaType?: string } = {},
 ): Promise<string | null> {
   const urls = await getPlayableStreamUrls(streamAddonManifestUrl, contentId, season, episode, opts);
   return urls[0] ?? null;

@@ -32,9 +32,10 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
 
   app.get(['/subtitles/:type/:id.json', '/subtitles/:type/:id/:extra.json'], async (req, res) => {
     try {
+      const typeParam = Array.isArray(req.params.type) ? req.params.type[0] : req.params.type;
       const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const rawId = decodeURIComponent(idParam);
-      const result = await handleSubtitlesRequest(rawId, handlerDeps);
+      const result = await handleSubtitlesRequest(rawId, handlerDeps, typeParam);
       const host = req.get('host');
       const protocol = req.protocol;
       const origin = host ? `${protocol}://${host}` : '';

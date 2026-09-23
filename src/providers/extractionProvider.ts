@@ -13,6 +13,7 @@ export interface ExtractionParams {
   queue: ExtractionQueue;
   extractionTimeoutMs: number;
   providerTimeoutMs: number;
+  mediaType?: string;
 }
 
 export async function runExtractionTier(params: ExtractionParams): Promise<ProviderResult> {
@@ -21,7 +22,7 @@ export async function runExtractionTier(params: ExtractionParams): Promise<Provi
     params.contentId,
     params.season,
     params.episode,
-    { timeoutMs: params.providerTimeoutMs },
+    { timeoutMs: params.providerTimeoutMs, mediaType: params.mediaType },
   );
   if (streamUrls.length === 0) return { found: false };
 

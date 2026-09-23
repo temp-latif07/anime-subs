@@ -31,7 +31,18 @@ describe('getBestStreamUrl', () => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ streams: [{ url: 'https://debrid.example.com/direct/slow.mkv' }] }));
         }, 100);
-        res.on('close', () => clearTimeout(timer));
+      } else if (req.url === '/stream/anime/kitsu:50350:1:6.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ streams: [{ url: 'https://debrid.example.com/direct/anime-priority.mkv' }] }));
+      } else if (req.url === '/stream/series/kitsu:50350:1:6.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ streams: [{ url: 'https://debrid.example.com/direct/series-fallback.mkv' }] }));
+      } else if (req.url === '/stream/series/kitsu:50350:7.json') {
+        res.writeHead(404);
+        res.end();
+      } else if (req.url === '/stream/series/kitsu:50350:1:7.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ streams: [{ url: 'https://debrid.example.com/direct/parallel-hit.mkv' }] }));
       } else {
         res.writeHead(404);
         res.end();
@@ -48,6 +59,18 @@ describe('getBestStreamUrl', () => {
 
   it('skips an infoHash-only entry and returns the first directly playable url', async () => {
     expect(await getBestStreamUrl(manifestUrl, 'kitsu:50350', 1, 1)).toBe('https://debrid.example.com/direct/episode1.mkv');
+  });
+
+  it('prioritizes anime type when mediaType is anime', async () => {
+    expect(
+      await getBestStreamUrl(manifestUrl, 'kitsu:50350', 1, 6, { mediaType: 'anime' }),
+    ).toBe('https://debrid.example.com/direct/anime-priority.mkv');
+  });
+
+  it('resolves stream when first variant 404s and second variant hits', async () => {
+    expect(
+      await getBestStreamUrl(manifestUrl, 'kitsu:50350', 1, 7),
+    ).toBe('https://debrid.example.com/direct/parallel-hit.mkv');
   });
 
   it('returns null when every stream is infoHash-only (unresolved torrent)', async () => {

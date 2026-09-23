@@ -1,4 +1,5 @@
 import { parseSubtitleRequestId, resolveIds } from './resolver/idResolver.js';
+import { getPlayableStreamUrls } from './providers/streamAddonClient.js';
 import type { AnimeDataset } from './resolver/animeDataset.js';
 import type { CacheStore } from './cache/cacheStore.js';
 import type { ExtractionQueue } from './queue/extractionQueue.js';
@@ -67,9 +68,17 @@ async function resolveOneLanguage(
     return false;
   }
 
+  const streamUrlsPromise = getPlayableStreamUrls(
+    deps.config.streamAddonUrl,
+    parsed.contentId,
+    parsed.season,
+    parsed.episode,
+    { timeoutMs: deps.config.providerTimeoutMs, mediaType },
+  ).catch(() => []);
+
   if (await tryFastTiers(key, anidbId, deps)) return true;
 
-  startExtractionInBackground(key, parsed, deps, mediaType);
+  startExtractionInBackground(key, parsed, deps, mediaType, streamUrlsPromise);
   return true;
 }
 
@@ -131,6 +140,7 @@ function startExtractionInBackground(
   parsed: { contentId: string; season: number; episode: number },
   deps: SubtitlesHandlerDeps,
   mediaType?: string,
+  streamUrls?: Promise<string[]>,
 ): void {
   if (deps.cache.getInFlight(key)) return;
 
@@ -146,6 +156,7 @@ function startExtractionInBackground(
     extractionTimeoutMs: deps.config.extractionTimeoutMs,
     providerTimeoutMs: deps.config.providerTimeoutMs,
     mediaType,
+    streamUrls,
   })
     .then((result) => {
       if (result.found && result.vttContent) {

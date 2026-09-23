@@ -192,4 +192,17 @@ describe('handleSubtitlesRequest', () => {
     expect(deps.jimakuProvider).toHaveBeenCalledTimes(1);
     expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
   });
+
+  it('passes pre-fetched streamUrls promise to extractionProvider on tier 3 fallback', async () => {
+    let passedParams: any = null;
+    deps.extractionProvider = vi.fn(async (params) => {
+      passedParams = params;
+      return { found: true, vttContent: 'WEBVTT\n\n1\nprefetched' };
+    });
+
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(passedParams).not.toBeNull();
+    expect(passedParams.streamUrls).toBeDefined();
+    expect(passedParams.streamUrls instanceof Promise).toBe(true);
+  });
 });

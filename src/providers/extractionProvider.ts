@@ -14,16 +14,19 @@ export interface ExtractionParams {
   extractionTimeoutMs: number;
   providerTimeoutMs: number;
   mediaType?: string;
+  streamUrls?: Promise<string[]> | string[];
 }
 
 export async function runExtractionTier(params: ExtractionParams): Promise<ProviderResult> {
-  const streamUrls = await getPlayableStreamUrls(
-    params.streamAddonUrl,
-    params.contentId,
-    params.season,
-    params.episode,
-    { timeoutMs: params.providerTimeoutMs, mediaType: params.mediaType },
-  );
+  const streamUrls = params.streamUrls
+    ? (Array.isArray(params.streamUrls) ? params.streamUrls : await params.streamUrls)
+    : await getPlayableStreamUrls(
+        params.streamAddonUrl,
+        params.contentId,
+        params.season,
+        params.episode,
+        { timeoutMs: params.providerTimeoutMs, mediaType: params.mediaType },
+      );
   if (streamUrls.length === 0) return { found: false };
 
   return params.queue.run(async () => {

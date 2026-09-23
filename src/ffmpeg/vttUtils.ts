@@ -1,4 +1,4 @@
-import { assColorToHex, JAPANESE_CHAR_REGEX } from './assUtils.js';
+import { JAPANESE_CHAR_REGEX } from './assUtils.js';
 
 function finalizeCue(
   timing: string,
@@ -20,21 +20,6 @@ function finalizeCue(
       line = line.replace(/\{[^}]*\\?an[789][^}]*\}/gi, '');
     }
 
-    // Translate {c&H...} or {\c&H...}
-    let openFont = false;
-    line = line.replace(/\{?\\?1?c(&?[hH]?[0-9a-fA-F]+&?)\}?/gi, (_, colorCode) => {
-      const hex = assColorToHex(colorCode);
-      const prefix = openFont ? '</font>' : '';
-      if (hex && hex !== '#FFFFFF') {
-        openFont = true;
-        return `${prefix}<font color="${hex}">`;
-      }
-      openFont = false;
-      return prefix;
-    });
-    if (openFont) {
-      line += '</font>';
-    }
 
     // Strip remaining residual {...}
     line = line.replace(/\{[^}]*\}/g, '').trim();

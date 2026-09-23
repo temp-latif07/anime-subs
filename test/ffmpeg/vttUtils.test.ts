@@ -44,10 +44,17 @@ describe('normalizeVtt', () => {
     );
   });
 
-  it('translates residual ASS color tags into font color tags', () => {
+  it('strips residual ASS color tags from cues', () => {
     const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\n{c&H00FFFF&}Yellow speaker\n';
     const normalized = normalizeVtt(raw);
-    expect(normalized).toContain('<font color="#FFFF00">Yellow speaker</font>');
+    expect(normalized).toContain('Yellow speaker');
+    expect(normalized).not.toContain('<font');
+  });
+
+  it('preserves words with ca, ci, ac, ce, cc letter combinations without corruption', () => {
+    const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\nBecause of the accident, I decided to practice and dance in the cinema with a cat.\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).toContain('Because of the accident, I decided to practice and dance in the cinema with a cat.');
   });
 
   it('formats dual-speaker cues with hyphens when different colors are present', () => {

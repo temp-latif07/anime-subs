@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 
 export interface RawDatasetEntry {
+  title?: string;
   sources: string[];
 }
 
@@ -11,6 +12,7 @@ export interface RawDataset {
 interface IdRow {
   anilistId: number | null;
   anidbId: number | null;
+  title: string | null;
 }
 
 const SOURCE_PATTERNS = {
@@ -49,19 +51,20 @@ export class AnimeDataset {
         anilist_id INTEGER,
         anidb_id INTEGER,
         kitsu_id INTEGER,
-        mal_id INTEGER
+        mal_id INTEGER,
+        title TEXT
       );
       CREATE INDEX idx_anilist ON anime_ids(anilist_id);
       CREATE INDEX idx_anidb ON anime_ids(anidb_id);
       CREATE INDEX idx_kitsu ON anime_ids(kitsu_id);
       CREATE INDEX idx_mal ON anime_ids(mal_id);
     `);
-    const insert = db.prepare('INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id) VALUES (?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id, title) VALUES (?, ?, ?, ?, ?)');
     const insertMany = db.transaction((entries: RawDatasetEntry[]) => {
       for (const entry of entries) {
         const ids = extractIds(entry.sources);
         if (ids.anilistId === null && ids.anidbId === null && ids.kitsuId === null && ids.malId === null) continue;
-        insert.run(ids.anilistId, ids.anidbId, ids.kitsuId, ids.malId);
+        insert.run(ids.anilistId, ids.anidbId, ids.kitsuId, ids.malId, entry.title ?? null);
       }
     });
     insertMany(raw.data);
@@ -69,12 +72,12 @@ export class AnimeDataset {
   }
 
   findByAnilistId(id: number): IdRow | null {
-    return (this.db.prepare('SELECT anilist_id as anilistId, anidb_id as anidbId FROM anime_ids WHERE anilist_id = ?').get(id) as IdRow) ?? null;
+    return (this.db.prepare('SELECT anilist_id as anilistId, anidb_id as anidbId, title FROM anime_ids WHERE anilist_id = ?').get(id) as IdRow) ?? null;
   }
 
   findByScheme(scheme: 'kitsu' | 'mal' | 'anidb', id: number): IdRow | null {
     const column = scheme === 'kitsu' ? 'kitsu_id' : scheme === 'mal' ? 'mal_id' : 'anidb_id';
-    return (this.db.prepare(`SELECT anilist_id as anilistId, anidb_id as anidbId FROM anime_ids WHERE ${column} = ?`).get(id) as IdRow) ?? null;
+    return (this.db.prepare(`SELECT anilist_id as anilistId, anidb_id as anidbId, title FROM anime_ids WHERE ${column} = ?`).get(id) as IdRow) ?? null;
   }
 }
 

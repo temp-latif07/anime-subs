@@ -21,17 +21,17 @@ const sampleRaw = {
 describe('AnimeDataset', () => {
   it('finds an entry by AniList id and returns its AniDB id', () => {
     const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
-    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617 });
+    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
   });
 
   it('finds an entry by Kitsu id', () => {
     const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
-    expect(dataset.findByScheme('kitsu', 46474)).toEqual({ anilistId: 154587, anidbId: 17617 });
+    expect(dataset.findByScheme('kitsu', 46474)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
   });
 
   it('finds an entry by MAL id', () => {
     const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
-    expect(dataset.findByScheme('mal', 52991)).toEqual({ anilistId: 154587, anidbId: 17617 });
+    expect(dataset.findByScheme('mal', 52991)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
   });
 
   it('returns null for an id with no match', () => {
@@ -41,6 +41,20 @@ describe('AnimeDataset', () => {
 
   it('builds successfully even when some entries have no mappable ids', () => {
     expect(() => AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'))).not.toThrow();
+  });
+
+  it('stores and returns the canonical anime title', () => {
+    const raw = {
+      data: [
+        {
+          title: 'Grand Blue Season 3',
+          sources: ['https://anidb.net/anime/19600', 'https://anilist.co/anime/199111'],
+        },
+      ],
+    };
+    const dataset = AnimeDataset.buildFromRaw(raw, new Database(':memory:'));
+    const row = dataset.findByAnilistId(199111);
+    expect(row?.title).toBe('Grand Blue Season 3');
   });
 });
 

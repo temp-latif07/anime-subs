@@ -4,14 +4,22 @@ import { AnimeDataset } from '../../src/resolver/animeDataset.js';
 import { parseSubtitleRequestId, resolveIds } from '../../src/resolver/idResolver.js';
 
 const dataset = AnimeDataset.buildFromRaw({
-  data: [{
-    sources: [
-      'https://anidb.net/anime/17617',
-      'https://anilist.co/anime/154587',
-      'https://kitsu.app/anime/46474',
-      'https://myanimelist.net/anime/52991',
-    ],
-  }],
+  data: [
+    {
+      sources: [
+        'https://anidb.net/anime/17617',
+        'https://anilist.co/anime/154587',
+        'https://kitsu.app/anime/46474',
+        'https://myanimelist.net/anime/52991',
+      ],
+    },
+    {
+      title: 'Grand Blue Season 3',
+      sources: [
+        'https://kitsu.app/anime/50181',
+      ],
+    },
+  ],
 }, new Database(':memory:'));
 
 describe('parseSubtitleRequestId', () => {
@@ -34,15 +42,15 @@ describe('parseSubtitleRequestId', () => {
 
 describe('resolveIds', () => {
   it('resolves a kitsu id via the dataset', () => {
-    expect(resolveIds('kitsu:46474', dataset)).toEqual({ anilistId: 154587, anidbId: 17617 });
+    expect(resolveIds('kitsu:46474', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
   });
 
   it('resolves a mal id via the dataset', () => {
-    expect(resolveIds('mal:52991', dataset)).toEqual({ anilistId: 154587, anidbId: 17617 });
+    expect(resolveIds('mal:52991', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
   });
 
   it('resolves an anilist id directly', () => {
-    expect(resolveIds('anilist:154587', dataset)).toEqual({ anilistId: 154587, anidbId: 17617 });
+    expect(resolveIds('anilist:154587', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
   });
 
   it('returns nulls for a bare tt id (no IMDb mapping in v1)', () => {
@@ -51,5 +59,10 @@ describe('resolveIds', () => {
 
   it('returns nulls for a recognized scheme with no dataset match', () => {
     expect(resolveIds('kitsu:999999', dataset)).toEqual({ anilistId: null, anidbId: null });
+  });
+
+  it('returns anime title in resolveIds', () => {
+    const ids = resolveIds('kitsu:50181', dataset);
+    expect(ids.title).toBe('Grand Blue Season 3');
   });
 });

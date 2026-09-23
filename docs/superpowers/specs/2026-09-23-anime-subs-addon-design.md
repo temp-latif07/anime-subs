@@ -130,8 +130,9 @@ Runs only when tiers 1–2 return nothing:
    there's no execution-time limit to design around — it just runs for
    as long as the source takes to stream through. A self-imposed
    `EXTRACTION_TIMEOUT_MS` (default 15 min) kills runaway/broken streams.
-5. Runs as a background task, capped at `EXTRACTION_CONCURRENCY` (default
-   1) parallel jobs to avoid overloading a home server.
+5. Runs as a background task, queued against `EXTRACTION_CONCURRENCY`
+   (default 1) — a request that would exceed the cap waits for a free
+   slot rather than spawning an extra ffmpeg process.
 
 Because extraction can't finish within a single HTTP response in general,
 the first request for a tier-3 episode returns a subtitle entry pointing
@@ -148,6 +149,40 @@ status (`pending` / `ready` / `negative`), and a path to the cached
 available yet gets retried later without hammering providers on every
 single request. Positive results are cached indefinitely.
 
+A `pending` row doubles as an in-flight lock: it's paired with an
+in-memory map of `(anilistId, episode, lang)` → in-progress promise, so a
+second request arriving while a lookup/extraction is already running
+attaches to that same in-flight work instead of starting a duplicate
+provider call or a duplicate ffmpeg process.
+
+## Performance & resource efficiency
+
+This runs unattended, 24/7, on the user's own home server — it must not
+waste CPU, bandwidth, or disk beyond what a given request actually needs.
+
+- **Cache-first, always.** Tiers 1–3 only run on a cache miss; a `ready`
+  or still-fresh `negative` entry short-circuits the whole chain before
+  any provider is called.
+- **In-flight de-duplication** (see Cache above) — no duplicate concurrent
+  work for the same key.
+- **Bounded extraction concurrency**, enforced as a real queue
+  (`EXTRACTION_CONCURRENCY`), not a soft/advisory limit.
+- **Subtitle-only extraction.** The ffmpeg command maps and copies only
+  the matched subtitle stream (`-map 0:s:<idx> -c:s webvtt`) — it never
+  transcodes video or audio, so CPU cost stays minimal regardless of the
+  source's resolution or codec. (Network cost of reading through the
+  container is inherent to how MKV interleaves tracks and isn't avoidable
+  without an upstream that indexes subtitle-only byte ranges, which
+  general anime releases don't provide.)
+- **Bounded HTTP calls.** Every outbound call (Jimaku, AnimeTosho, the
+  stream addon) has an explicit timeout (`PROVIDER_TIMEOUT_MS`, default
+  8s) so a slow or hanging upstream can't tie up a request or an
+  extraction slot indefinitely.
+- **No client-side polling.** The placeholder-VTT-then-reselect flow means
+  the server never polls its own background jobs on the client's behalf —
+  the next fetch only happens when the user (or Stremio) naturally
+  re-requests.
+
 ## Configuration (env vars)
 
 | Var | Required | Default | Purpose |
@@ -158,8 +193,9 @@ single request. Positive results are cached indefinitely.
 | `JIMAKU_API_KEY` | yes | — | Jimaku API key |
 | `SUBTITLE_LANGUAGES` | no | `eng` | Comma-separated target language(s) |
 | `NEGATIVE_CACHE_TTL_HOURS` | no | `24` | How long a "nothing found" result is trusted before retrying |
-| `EXTRACTION_CONCURRENCY` | no | `1` | Max parallel ffmpeg extraction jobs |
+| `EXTRACTION_CONCURRENCY` | no | `1` | Max parallel ffmpeg extraction jobs (queued, not dropped, beyond this) |
 | `EXTRACTION_TIMEOUT_MS` | no | `900000` | Kill a stuck extraction after this long |
+| `PROVIDER_TIMEOUT_MS` | no | `8000` | Timeout for each outbound Jimaku/AnimeTosho/stream-addon HTTP call |
 | `LOG_LEVEL` | no | `info` | Logging verbosity |
 
 ## Error handling

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { fetchBuffer } from '../http/httpClient.js';
 
 export interface FoundSubtitleStream {
   index: number;
@@ -45,12 +46,112 @@ export function runCommand(command: string, args: string[], timeoutMs: number): 
   });
 }
 
+export function runCommandWithInput(
+  command: string,
+  args: string[],
+  input: Buffer,
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`${command} exited with code ${code}: ${stderr}`));
+        return;
+      }
+      resolve(stdout);
+    });
+
+    child.stdin.on('error', () => {});
+    child.stdin.write(input);
+    child.stdin.end();
+  });
+}
+
+function parseSubtitleStreams(output: string, lang: string): FoundSubtitleStream | null {
+  try {
+    const parsed = JSON.parse(output) as FfprobeOutput;
+    const streams = parsed.streams ?? [];
+    const matching = streams.filter((s) => s.tags?.language === lang);
+    if (matching.length === 0) return null;
+    const dialogue = matching.find((s) => {
+      const title = (s.tags?.title ?? '').toLowerCase();
+      return !title.includes('sign') && !title.includes('song');
+    });
+    const selected = dialogue ?? matching[0];
+    return {
+      index: selected.index,
+      codec: (selected.codec_name ?? 'ass').toLowerCase(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function findSubtitleStreamFromBuffer(
+  buffer: Buffer,
+  lang: string,
+  timeoutMs = 10000,
+): Promise<FoundSubtitleStream | null> {
+  try {
+    const output = await runCommandWithInput(
+      'ffprobe',
+      [
+        '-v', 'quiet',
+        '-print_format', 'json',
+        '-show_streams',
+        '-select_streams', 's',
+        '-i', 'pipe:0',
+      ],
+      buffer,
+      timeoutMs,
+    );
+    return parseSubtitleStreams(output, lang);
+  } catch {
+    return null;
+  }
+}
+
 export async function findSubtitleStream(
   sourceUrl: string,
   lang: string,
   timeoutMs = 30000,
 ): Promise<FoundSubtitleStream | null> {
   const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
+
+  if (isHttp) {
+    try {
+      const rangeBuffer = await fetchBuffer(sourceUrl, {
+        headers: { Range: 'bytes=0-2097151' },
+        timeoutMs: Math.min(timeoutMs, 5000),
+      });
+      if (rangeBuffer.length > 0) {
+        const fromBuffer = await findSubtitleStreamFromBuffer(rangeBuffer, lang, 5000);
+        if (fromBuffer !== null) return fromBuffer;
+      }
+    } catch {
+      // Fall through to remote URL ffprobe
+    }
+  }
+
   const httpArgs = isHttp
     ? [
         '-reconnect', '1',
@@ -79,19 +180,7 @@ export async function findSubtitleStream(
     ],
     timeoutMs,
   );
-  const parsed = JSON.parse(output) as FfprobeOutput;
-  const streams = parsed.streams ?? [];
-  const matching = streams.filter((s) => s.tags?.language === lang);
-  if (matching.length === 0) return null;
-  const dialogue = matching.find((s) => {
-    const title = (s.tags?.title ?? '').toLowerCase();
-    return !title.includes('sign') && !title.includes('song');
-  });
-  const selected = dialogue ?? matching[0];
-  return {
-    index: selected.index,
-    codec: (selected.codec_name ?? 'ass').toLowerCase(),
-  };
+  return parseSubtitleStreams(output, lang);
 }
 
 export async function findSubtitleStreamIndex(

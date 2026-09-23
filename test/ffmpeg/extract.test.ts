@@ -3,8 +3,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findSubtitleStreamIndex, findSubtitleStream } from '../../src/ffmpeg/probe.js';
+import { findSubtitleStreamIndex, findSubtitleStream, findSubtitleStreamFromBuffer } from '../../src/ffmpeg/probe.js';
 import { extractSubtitleToVtt, convertToVtt } from '../../src/ffmpeg/extract.js';
+import { readFileSync } from 'node:fs';
 
 describe('ffmpeg subtitle extraction (real ffmpeg/ffprobe subprocess)', () => {
   let dir: string;
@@ -59,9 +60,22 @@ describe('ffmpeg subtitle extraction (real ffmpeg/ffprobe subprocess)', () => {
     expect(stream).toEqual({ index: 1, codec: 'ass' });
   });
 
+  it('finds subtitle stream from buffer in memory via findSubtitleStreamFromBuffer', async () => {
+    const buffer = readFileSync(mkvPath);
+    const stream = await findSubtitleStreamFromBuffer(buffer, 'eng');
+    expect(stream).toEqual({ index: 1, codec: 'subrip' });
+  });
+
+  it('finds ASS subtitle stream from buffer in memory via findSubtitleStreamFromBuffer', async () => {
+    const buffer = readFileSync(assMkvPath);
+    const stream = await findSubtitleStreamFromBuffer(buffer, 'eng');
+    expect(stream).toEqual({ index: 1, codec: 'ass' });
+  });
+
   it('returns null when no stream matches the requested language', async () => {
     expect(await findSubtitleStreamIndex(mkvPath, 'spa')).toBeNull();
     expect(await findSubtitleStream(mkvPath, 'spa')).toBeNull();
+    expect(await findSubtitleStreamFromBuffer(readFileSync(mkvPath), 'spa')).toBeNull();
   });
 
   it('extracts the subtitle stream as WebVTT containing the known text', async () => {

@@ -465,6 +465,7 @@ git commit -m "Add shared types and SQLite-backed cache store"
 **Files:**
 - Create: `src/resolver/animeDataset.ts`
 - Create: `src/resolver/idResolver.ts`
+- Modify: `src/types.ts` (add `ResolvedIds`)
 - Test: `test/resolver/animeDataset.test.ts`
 - Test: `test/resolver/idResolver.test.ts`
 
@@ -1143,7 +1144,7 @@ git commit -m "Add xz decompression helper for AnimeTosho attachments"
 
 **Interfaces:**
 - Consumes: `fetchJson` from `src/http/httpClient.js` (Task 4), `convertToVtt` from `src/ffmpeg/extract.js` (Task 5), `ProviderResult` from `src/types.js` (Task 2).
-- Produces: `async function findJimakuSubtitle(anilistId: number, episode: number, lang: string, apiKey: string, baseUrl?: string): Promise<ProviderResult>`.
+- Produces: `interface JimakuOptions { baseUrl?: string; timeoutMs?: number }` and `async function findJimakuSubtitle(anilistId: number, episode: number, lang: string, apiKey: string, opts?: JimakuOptions): Promise<ProviderResult>`. The optional tail is a single options object (not separate positional params) specifically so `timeoutMs` can be added here and threaded through from `Config.providerTimeoutMs` in Task 12 without colliding positionally with `baseUrl`.
 
 **Verified contract** (from Jimaku's live OpenAPI spec at `/api/openapi.json`): `GET {baseUrl}/api/entries/search?anilist_id={id}` with header `Authorization: {apiKey}` returns `Entry[]` (`{ id, flags: { anime, adult, ... } }`); `GET {baseUrl}/api/entries/{entryId}/files?episode={n}` returns `FileEntry[]` (`{ name, url, ... }`) with **no language field** — language must be inferred from `name` by convention.
 
@@ -1196,7 +1197,7 @@ describe('findJimakuSubtitle', () => {
   afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
   it('finds an English file by filename heuristic, converts it, and sends the API key header', async () => {
-    const result = await findJimakuSubtitle(154587, 5, 'eng', 'test-key', baseUrl);
+    const result = await findJimakuSubtitle(154587, 5, 'eng', 'test-key', { baseUrl });
     expect(result.found).toBe(true);
     expect(result.vttContent).toContain('WEBVTT');
     expect(result.vttContent).toContain('Jimaku fixture line');
@@ -1204,13 +1205,18 @@ describe('findJimakuSubtitle', () => {
   });
 
   it('returns not found when no entry matches the anilist id', async () => {
-    const result = await findJimakuSubtitle(999999, 5, 'eng', 'test-key', baseUrl);
+    const result = await findJimakuSubtitle(999999, 5, 'eng', 'test-key', { baseUrl });
     expect(result.found).toBe(false);
   });
 
   it('returns not found when the episode has no English-matching file', async () => {
-    const result = await findJimakuSubtitle(154587, 99, 'eng', 'test-key', baseUrl);
+    const result = await findJimakuSubtitle(154587, 99, 'eng', 'test-key', { baseUrl });
     expect(result.found).toBe(false);
+  });
+
+  it('applies a custom timeoutMs to outbound requests', async () => {
+    const result = await findJimakuSubtitle(154587, 5, 'eng', 'test-key', { baseUrl, timeoutMs: 5000 });
+    expect(result.found).toBe(true);
   });
 });
 ```
@@ -1256,23 +1262,31 @@ function extToVttInput(filename: string): 'ass' | 'srt' | null {
   return null;
 }
 
+export interface JimakuOptions {
+  baseUrl?: string;
+  timeoutMs?: number;
+}
+
 export async function findJimakuSubtitle(
   anilistId: number,
   episode: number,
   lang: string,
   apiKey: string,
-  baseUrl = 'https://jimaku.cc',
+  opts: JimakuOptions = {},
 ): Promise<ProviderResult> {
+  const baseUrl = opts.baseUrl ?? 'https://jimaku.cc';
+  const timeoutMs = opts.timeoutMs ?? 8000;
+
   const entries = await fetchJson<JimakuEntry[]>(
     `${baseUrl}/api/entries/search?anilist_id=${anilistId}`,
-    { headers: { Authorization: apiKey } },
+    { headers: { Authorization: apiKey }, timeoutMs },
   );
   const entry = entries.find((e) => e.flags.anime && !e.flags.adult);
   if (!entry) return { found: false };
 
   const files = await fetchJson<JimakuFile[]>(
     `${baseUrl}/api/entries/${entry.id}/files?episode=${episode}`,
-    { headers: { Authorization: apiKey } },
+    { headers: { Authorization: apiKey }, timeoutMs },
   );
   const match = files.find((f) => matchesLanguage(f.name, lang));
   if (!match) return { found: false };
@@ -1280,7 +1294,7 @@ export async function findJimakuSubtitle(
   const ext = extToVttInput(match.name);
   if (!ext) return { found: false };
 
-  const raw = await fetchBuffer(match.url);
+  const raw = await fetchBuffer(match.url, { timeoutMs });
   const vttContent = ext === 'vtt' ? raw.toString('utf-8') : await convertToVtt(raw, ext);
   return { found: true, vttContent };
 }
@@ -1291,7 +1305,7 @@ Note: the test fixture uses a `.srt` file, so `extToVttInput` always returns `'s
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/providers/jimakuProvider.test.ts`
-Expected: PASS (3 tests)
+Expected: PASS (4 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1310,7 +1324,7 @@ git commit -m "Add Jimaku provider (tier 1)"
 
 **Interfaces:**
 - Consumes: `fetchJson`, `fetchBuffer` (Task 4); `decompressXz` (Task 6); `convertToVtt` (Task 5); `ProviderResult` (Task 2).
-- Produces: `async function findAnimeToshoSubtitle(anidbId: number, episode: number, lang: string, feedBaseUrl?: string, storageBaseUrl?: string): Promise<ProviderResult>`.
+- Produces: `interface AnimeToshoOptions { feedBaseUrl?: string; storageBaseUrl?: string; timeoutMs?: number }` and `async function findAnimeToshoSubtitle(anidbId: number, episode: number, lang: string, opts?: AnimeToshoOptions): Promise<ProviderResult>`. Same options-object pattern as Task 7's `JimakuOptions`, for the same reason.
 
 **Verified contract** (confirmed live end-to-end against a real release): `GET {feedBaseUrl}/json?t=search&aid={anidbId}&limit=50` → torrent summaries `{ id, title, status, num_files }`; `GET {feedBaseUrl}/json?show=torrent&id={id}` → `{ files: [{ filename, attachments: [{ id, type, info: { codec, lang, tracknum } }] }] | null }`; download URL is `{storageBaseUrl}/storage/attach/{id.toString(16).padStart(8,'0')}/{encodeURIComponent(filenameWithoutExt + '_track' + tracknum + '.' + lang + '.' + codec.toLowerCase() + '.xz')}`, 301-redirects, body is xz-compressed subtitle text.
 
@@ -1367,19 +1381,19 @@ describe('findAnimeToshoSubtitle', () => {
   afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
   it('finds, downloads, decompresses, and converts the matching episode subtitle', async () => {
-    const result = await findAnimeToshoSubtitle(18886, 5, 'eng', baseUrl, baseUrl);
+    const result = await findAnimeToshoSubtitle(18886, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
     expect(result.found).toBe(true);
     expect(result.vttContent).toContain('WEBVTT');
     expect(result.vttContent).toContain('AnimeTosho fixture line');
   });
 
   it('returns not found when no episode in the search results matches', async () => {
-    const result = await findAnimeToshoSubtitle(18886, 99, 'eng', baseUrl, baseUrl);
+    const result = await findAnimeToshoSubtitle(18886, 99, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
     expect(result.found).toBe(false);
   });
 
   it('skips batch releases (num_files > 1) even if the title parses to the right episode', async () => {
-    const result = await findAnimeToshoSubtitle(18886, 1, 'eng', baseUrl, baseUrl);
+    const result = await findAnimeToshoSubtitle(18886, 1, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
     expect(result.found).toBe(false);
   });
 });
@@ -1435,19 +1449,28 @@ function buildAttachmentUrl(storageBaseUrl: string, attachmentId: number, videoF
   return `${storageBaseUrl}/storage/attach/${id8}/${encodeURIComponent(name)}`;
 }
 
+export interface AnimeToshoOptions {
+  feedBaseUrl?: string;
+  storageBaseUrl?: string;
+  timeoutMs?: number;
+}
+
 export async function findAnimeToshoSubtitle(
   anidbId: number,
   episode: number,
   lang: string,
-  feedBaseUrl = 'https://feed.animetosho.org',
-  storageBaseUrl = 'https://animetosho.org',
+  opts: AnimeToshoOptions = {},
 ): Promise<ProviderResult> {
-  const results = await fetchJson<ToshoSearchResult[]>(`${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`);
+  const feedBaseUrl = opts.feedBaseUrl ?? 'https://feed.animetosho.org';
+  const storageBaseUrl = opts.storageBaseUrl ?? 'https://animetosho.org';
+  const timeoutMs = opts.timeoutMs ?? 8000;
+
+  const results = await fetchJson<ToshoSearchResult[]>(`${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`, { timeoutMs });
 
   const candidates = results.filter((r) => r.status === 'complete' && r.num_files === 1 && parseEpisodeNumber(r.title) === episode);
 
   for (const candidate of candidates) {
-    const detail = await fetchJson<ToshoTorrentDetail>(`${feedBaseUrl}/json?show=torrent&id=${candidate.id}`);
+    const detail = await fetchJson<ToshoTorrentDetail>(`${feedBaseUrl}/json?show=torrent&id=${candidate.id}`, { timeoutMs });
     if (!detail.files) continue;
 
     for (const file of detail.files) {
@@ -1455,7 +1478,7 @@ export async function findAnimeToshoSubtitle(
       if (!attachment?.info?.codec || attachment.info.tracknum === undefined) continue;
 
       const url = buildAttachmentUrl(storageBaseUrl, attachment.id, file.filename, attachment.info.tracknum, lang, attachment.info.codec);
-      const compressed = await fetchBuffer(url);
+      const compressed = await fetchBuffer(url, { timeoutMs });
       const decompressed = await decompressXz(compressed);
       const ext = attachment.info.codec.toLowerCase() === 'ass' ? 'ass' : 'srt';
       const vttContent = await convertToVtt(decompressed, ext);
@@ -1489,7 +1512,7 @@ git commit -m "Add AnimeTosho provider (tier 2)"
 
 **Interfaces:**
 - Consumes: `fetchJson` (Task 4).
-- Produces: `async function getBestStreamUrl(streamAddonManifestUrl: string, contentId: string, season: number, episode: number): Promise<string | null>` — returns the first stream with a playable `url` field, skipping `infoHash`-only entries.
+- Produces: `async function getBestStreamUrl(streamAddonManifestUrl: string, contentId: string, season: number, episode: number, opts?: { timeoutMs?: number }): Promise<string | null>` — returns the first stream with a playable `url` field, skipping `infoHash`-only entries. `opts.timeoutMs` defaults to 8000 and is how Task 11 threads `Config.providerTimeoutMs` through.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1567,9 +1590,11 @@ export async function getBestStreamUrl(
   contentId: string,
   season: number,
   episode: number,
+  opts: { timeoutMs?: number } = {},
 ): Promise<string | null> {
   const requestId = `${contentId}:${season}:${episode}`;
-  const response = await fetchJson<StreamResponse>(buildStreamRequestUrl(streamAddonManifestUrl, requestId), { timeoutMs: 15000 });
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const response = await fetchJson<StreamResponse>(buildStreamRequestUrl(streamAddonManifestUrl, requestId), { timeoutMs });
   const playable = response.streams.find((s) => typeof s.url === 'string' && s.url.length > 0);
   return playable?.url ?? null;
 }
@@ -1715,7 +1740,7 @@ git commit -m "Add concurrency-limited extraction queue"
 
 **Interfaces:**
 - Consumes: `getBestStreamUrl` (Task 9), `findSubtitleStreamIndex` (Task 5), `extractSubtitleToVtt` (Task 5), `ExtractionQueue` (Task 10), `ProviderResult` (Task 2).
-- Produces: `export interface ExtractionParams { streamAddonUrl: string; contentId: string; season: number; episode: number; lang: string; queue: ExtractionQueue; extractionTimeoutMs: number; }` and `async function runExtractionTier(params: ExtractionParams): Promise<ProviderResult>`.
+- Produces: `export interface ExtractionParams { streamAddonUrl: string; contentId: string; season: number; episode: number; lang: string; queue: ExtractionQueue; extractionTimeoutMs: number; providerTimeoutMs: number; }` and `async function runExtractionTier(params: ExtractionParams): Promise<ProviderResult>`. `providerTimeoutMs` bounds the initial stream-addon lookup call (via `getBestStreamUrl`'s `opts.timeoutMs`); `extractionTimeoutMs` bounds the much longer ffprobe/ffmpeg subprocess calls. These are deliberately separate fields — conflating them would force the stream-addon HTTP call to wait up to 15 minutes instead of failing fast.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1786,6 +1811,7 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       lang: 'eng',
       queue: new ExtractionQueue(1),
       extractionTimeoutMs: 30000,
+      providerTimeoutMs: 8000,
     });
     expect(result.found).toBe(true);
     expect(result.vttContent).toContain('Remote extraction fixture');
@@ -1800,6 +1826,7 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       lang: 'eng',
       queue: new ExtractionQueue(1),
       extractionTimeoutMs: 30000,
+      providerTimeoutMs: 8000,
     });
     expect(result.found).toBe(false);
   });
@@ -1829,10 +1856,14 @@ export interface ExtractionParams {
   lang: string;
   queue: ExtractionQueue;
   extractionTimeoutMs: number;
+  providerTimeoutMs: number;
 }
 
 export async function runExtractionTier(params: ExtractionParams): Promise<ProviderResult> {
-  const streamUrl = await getBestStreamUrl(params.streamAddonUrl, params.contentId, params.season, params.episode);
+  const streamUrl = await getBestStreamUrl(
+    params.streamAddonUrl, params.contentId, params.season, params.episode,
+    { timeoutMs: params.providerTimeoutMs },
+  );
   if (!streamUrl) return { found: false };
 
   return params.queue.run(async () => {
@@ -1866,7 +1897,7 @@ git commit -m "Add extraction provider (tier 3), queued and network-verified end
 
 **Interfaces:**
 - Consumes: `parseSubtitleRequestId`, `resolveIds` (Task 3); `AnimeDataset` (Task 3); `CacheStore` (Task 2); `ExtractionQueue` (Task 10); `Config` (Task 1); `CacheKey`, `ProviderResult`, `SubtitleCandidate` (Task 2); `ExtractionParams` (Task 11).
-- Produces: adds `export interface DatasetHolder { current: AnimeDataset; }` to `src/types.ts`'s import surface (defined alongside the handler since only the handler and its caller need it); `export interface SubtitlesHandlerDeps { dataset: DatasetHolder; cache: CacheStore; queue: ExtractionQueue; config: Config; buildSubtitleUrl: (key: CacheKey) => string; jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string) => Promise<ProviderResult>; animetoshoProvider: (anidbId: number, episode: number, lang: string) => Promise<ProviderResult>; extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>; }`; `async function handleSubtitlesRequest(rawId: string, deps: SubtitlesHandlerDeps): Promise<{ subtitles: SubtitleCandidate[] }>`.
+- Produces: `export interface DatasetHolder { current: AnimeDataset; }`, defined directly in `src/subtitlesHandler.ts` (not `src/types.ts` — only this handler and its Task 13 caller need it); `export interface SubtitlesHandlerDeps { dataset: DatasetHolder; cache: CacheStore; queue: ExtractionQueue; config: Config; buildSubtitleUrl: (key: CacheKey) => string; jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>; animetoshoProvider: (anidbId: number, episode: number, lang: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>; extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>; }`; `async function handleSubtitlesRequest(rawId: string, deps: SubtitlesHandlerDeps): Promise<{ subtitles: SubtitleCandidate[] }>`. The provider deps' trailing `opts` parameter is how `Config.providerTimeoutMs` reaches Tasks 7/8/9's HTTP calls — see Task 7/8/9/11's options-object interfaces.
 
 The provider functions are injected (not imported directly) specifically so this task's tests never make a real network/ffmpeg call — they test orchestration logic only. Task 13 wires the real `findJimakuSubtitle`/`findAnimeToshoSubtitle`/`runExtractionTier` in.
 
@@ -1994,8 +2025,8 @@ export interface SubtitlesHandlerDeps {
   queue: ExtractionQueue;
   config: Config;
   buildSubtitleUrl: (key: CacheKey) => string;
-  jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string) => Promise<ProviderResult>;
-  animetoshoProvider: (anidbId: number, episode: number, lang: string) => Promise<ProviderResult>;
+  jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>;
+  animetoshoProvider: (anidbId: number, episode: number, lang: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>;
   extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>;
 }
 
@@ -2036,8 +2067,9 @@ async function resolveOneLanguage(
 }
 
 async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: SubtitlesHandlerDeps): Promise<boolean> {
+  const timeoutOpts = { timeoutMs: deps.config.providerTimeoutMs };
   try {
-    const jimaku = await deps.jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey);
+    const jimaku = await deps.jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts);
     if (jimaku.found && jimaku.vttContent) {
       deps.cache.setReady(key, 1, jimaku.vttContent);
       return true;
@@ -2048,7 +2080,7 @@ async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: Subtitl
 
   if (anidbId !== null) {
     try {
-      const tosho = await deps.animetoshoProvider(anidbId, key.episode, key.lang);
+      const tosho = await deps.animetoshoProvider(anidbId, key.episode, key.lang, timeoutOpts);
       if (tosho.found && tosho.vttContent) {
         deps.cache.setReady(key, 2, tosho.vttContent);
         return true;
@@ -2077,6 +2109,7 @@ function startExtractionInBackground(
     lang: key.lang,
     queue: deps.queue,
     extractionTimeoutMs: deps.config.extractionTimeoutMs,
+    providerTimeoutMs: deps.config.providerTimeoutMs,
   })
     .then((result) => {
       if (result.found && result.vttContent) {

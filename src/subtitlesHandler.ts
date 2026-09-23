@@ -27,8 +27,12 @@ export async function handleSubtitlesRequest(
 ): Promise<{ subtitles: SubtitleCandidate[] }> {
   const parsed = parseSubtitleRequestId(rawId);
   const ids = resolveIds(parsed.contentId, deps.dataset.current);
-  if (ids.anilistId === null) return { subtitles: [] };
+  if (ids.anilistId === null) {
+    console.log(`[AnimeSubs] Content ID not resolvable in dataset: ${parsed.contentId}`);
+    return { subtitles: [] };
+  }
   const anilistId = ids.anilistId;
+  console.log(`[AnimeSubs] Resolving subtitles for ${rawId} -> anilist:${anilistId}${ids.anidbId ? `, anidb:${ids.anidbId}` : ''}`);
 
   const results = await Promise.all(
     deps.config.subtitleLanguages.map(async (lang) => {
@@ -48,8 +52,16 @@ async function resolveOneLanguage(
   deps: SubtitlesHandlerDeps,
 ): Promise<boolean> {
   const cached = deps.cache.get(key);
-  if (cached?.status === 'ready' || cached?.status === 'pending') return true;
+  if (cached?.status === 'ready') {
+    console.log(`[Cache] HIT (ready) for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
+    return true;
+  }
+  if (cached?.status === 'pending') {
+    console.log(`[Cache] HIT (pending extraction) for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
+    return true;
+  }
   if (cached?.status === 'negative' && !deps.cache.isNegativeExpired(cached, deps.config.negativeCacheTtlHours)) {
+    console.log(`[Cache] HIT (negative TTL active) for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
     return false;
   }
 
@@ -64,22 +76,24 @@ async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: Subtitl
   try {
     const jimaku = await deps.jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts);
     if (jimaku.found && jimaku.vttContent) {
+      console.log(`[Tier 1: Jimaku] HIT for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
       deps.cache.setReady(key, 1, jimaku.vttContent);
       return true;
     }
-  } catch {
-    // isolated failure -- fall through to the next tier
+  } catch (err) {
+    console.warn(`[Tier 1: Jimaku] Warning: ${(err as Error).message}`);
   }
 
   if (anidbId !== null) {
     try {
       const tosho = await deps.animetoshoProvider(anidbId, key.episode, key.lang, timeoutOpts);
       if (tosho.found && tosho.vttContent) {
+        console.log(`[Tier 2: AnimeTosho] HIT for anidb:${anidbId} ep:${key.episode} (${key.lang})`);
         deps.cache.setReady(key, 2, tosho.vttContent);
         return true;
       }
-    } catch {
-      // isolated failure -- fall through to the next tier
+    } catch (err) {
+      console.warn(`[Tier 2: AnimeTosho] Warning: ${(err as Error).message}`);
     }
   }
 
@@ -93,6 +107,7 @@ function startExtractionInBackground(
 ): void {
   if (deps.cache.getInFlight(key)) return;
 
+  console.log(`[Tier 3: Extraction] Starting background extraction for ${parsed.contentId} ep:${parsed.episode} (${key.lang})`);
   deps.cache.setPending(key);
   const job = deps.extractionProvider({
     streamAddonUrl: deps.config.streamAddonUrl,
@@ -106,13 +121,16 @@ function startExtractionInBackground(
   })
     .then((result) => {
       if (result.found && result.vttContent) {
+        console.log(`[Tier 3: Extraction] SUCCESS: extracted subtitles ready for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
         deps.cache.setReady(key, 3, result.vttContent);
       } else {
+        console.log(`[Tier 3: Extraction] NOT FOUND: no matching subtitle stream for ${parsed.contentId} ep:${parsed.episode}`);
         deps.cache.setNegative(key);
       }
       return result;
     })
-    .catch(() => {
+    .catch((err) => {
+      console.warn(`[Tier 3: Extraction] Error during extraction: ${(err as Error)?.message ?? err}`);
       deps.cache.setNegative(key);
       return { found: false } as ProviderResult;
     })

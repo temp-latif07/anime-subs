@@ -7,8 +7,12 @@ import type { CacheStore } from './cache/cacheStore.js';
 export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStore): Express {
   const app = express();
 
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
+    const start = Date.now();
+    res.on('finish', () => {
+      console.log(`[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} (${Date.now() - start}ms)`);
+    });
     next();
   });
 

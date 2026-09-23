@@ -1,17 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { findAnimeToshoSubtitle } from '../../src/providers/animetoshoProvider.js';
+import { findAnimeToshoSubtitle, parseEpisodeNumber } from '../../src/providers/animetoshoProvider.js';
 
 describe('findAnimeToshoSubtitle', () => {
   let server: Server;
   let baseUrl: string;
+  let lastSearchUrl: string | null = null;
   let compressedAssSubtitle: Buffer;
   let compressedSrtSubtitle: Buffer;
   let compressedJpSrtSubtitle: Buffer;
   const expectedAssPath = '/storage/attach/002b205c/%5BGroup%5D%20Show%20-%2005%20(1080p)%20%5BABCD1234%5D_track3.eng.ass.xz';
   const expectedSrtPath = '/storage/attach/00000064/Show%20S01E06_track2.eng.srt.xz';
   const expectedJpSrtPath = '/storage/attach/00000320/Show%20S01E08_track2.eng.srt.xz';
+  const expectedBatchAssPath = '/storage/attach/000003ea/%5BGroup%5D%20BatchShow%20-%2002%20%5B1080p%5D_track2.eng.ass.xz';
+  const expectedFallbackSrtPath = '/storage/attach/000007d1/%5BGroup%5D%20Fallback%20Show%20-%2001%20%5B1080p%5D_track2.eng.srt.xz';
+  const expectedExpandedAssPath = '/storage/attach/00000bb9/%5BGroup%5D%20Show%2006%20%5B1080p%5D_track3.eng.ass.xz';
 
   beforeAll(async () => {
     compressedAssSubtitle = execFileSync('xz', ['-c'], {
@@ -27,7 +31,9 @@ describe('findAnimeToshoSubtitle', () => {
     server = createServer((req, res) => {
       const url = new URL(req.url!, 'http://localhost');
       if (url.pathname === '/json' && url.searchParams.get('t') === 'search') {
+        lastSearchUrl = req.url!;
         const aid = url.searchParams.get('aid');
+        const q = url.searchParams.get('q');
         if (aid === '18886') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify([
@@ -37,6 +43,21 @@ describe('findAnimeToshoSubtitle', () => {
             { id: 4, title: 'Show S01E06.mkv', status: 'complete', num_files: 1 },
             { id: 5, title: '[Group] Show - 07.mkv', status: 'complete', num_files: 1 },
             { id: 8, title: 'Show S01E08.mkv', status: 'complete', num_files: 1 },
+          ]));
+        } else if (aid === '19999') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 10, title: '[Group] BatchShow (01-12) [1080p]', status: 'complete', num_files: 12 },
+          ]));
+        } else if (aid === '29999') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 30, title: '[Group] Show 06 [1080p].mkv', status: 'complete', num_files: 1 },
+          ]));
+        } else if (!aid && q && (q.startsWith('Fallback Show') || q.startsWith('Fallback  Show'))) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 20, title: '[Group] Fallback Show - 01 [1080p].mkv', status: 'complete', num_files: 1 },
           ]));
         } else {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -83,6 +104,44 @@ describe('findAnimeToshoSubtitle', () => {
             ],
           }],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '10') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [
+            {
+              filename: '[Group] BatchShow - 01 [1080p].mkv',
+              attachments: [
+                { id: 1001, type: 'subtitle', info: { codec: 'ASS', lang: 'eng', tracknum: 2 } },
+              ],
+            },
+            {
+              filename: '[Group] BatchShow - 02 [1080p].mkv',
+              attachments: [
+                { id: 1002, type: 'subtitle', info: { codec: 'ASS', lang: 'eng', tracknum: 2 } },
+              ],
+            },
+          ],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '20') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] Fallback Show - 01 [1080p].mkv',
+            attachments: [
+              { id: 2001, type: 'subtitle', info: { codec: 'SRT', lang: 'eng', tracknum: 2 } },
+            ],
+          }],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '30') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] Show 06 [1080p].mkv',
+            attachments: [
+              { id: 3001, type: 'subtitle', info: { codec: 'ASS', lang: 'eng', tracknum: 3 } },
+            ],
+          }],
+        }));
       } else if (url.pathname === expectedAssPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
@@ -92,6 +151,15 @@ describe('findAnimeToshoSubtitle', () => {
       } else if (url.pathname === expectedJpSrtPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedJpSrtSubtitle);
+      } else if (url.pathname === expectedBatchAssPath) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedAssSubtitle);
+      } else if (url.pathname === expectedFallbackSrtPath) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedSrtSubtitle);
+      } else if (url.pathname === expectedExpandedAssPath) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedAssSubtitle);
       } else {
         res.writeHead(404);
         res.end();
@@ -149,6 +217,74 @@ describe('findAnimeToshoSubtitle', () => {
   it('rejects a subtitle candidate that is predominantly Japanese and returns not found', async () => {
     const result = await findAnimeToshoSubtitle(18886, 8, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
     expect(result.found).toBe(false);
+  });
+
+  it('includes targeted episode in aid search query (q=5)', async () => {
+    lastSearchUrl = null;
+    await findAnimeToshoSubtitle(18886, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(lastSearchUrl).toBeDefined();
+    const parsed = new URL(lastSearchUrl!, baseUrl);
+    expect(parsed.searchParams.get('aid')).toBe('18886');
+    expect(parsed.searchParams.get('q')).toBe('5');
+  });
+
+  it('parses batch torrents (num_files > 1) by iterating detail.files to match episode', async () => {
+    const result = await findAnimeToshoSubtitle(19999, 2, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('WEBVTT');
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
+  });
+
+  it('falls back to title search when aid returns 0 results', async () => {
+    const result = await findAnimeToshoSubtitle(99999, 1, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+      title: 'Fallback: Show!',
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('WEBVTT');
+    expect(result.vttContent).toContain('AnimeTosho SRT fixture line');
+  });
+
+  it('searches by title directly when anidbId is null', async () => {
+    const result = await findAnimeToshoSubtitle(null, 1, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+      title: 'Fallback Show',
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('WEBVTT');
+    expect(result.vttContent).toContain('AnimeTosho SRT fixture line');
+  });
+
+  it('returns seriesNotFound: true when both aid and title search return 0 results', async () => {
+    const result = await findAnimeToshoSubtitle(99999, 1, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+      title: 'Nonexistent Show',
+    });
+    expect(result.found).toBe(false);
+    expect(result.seriesNotFound).toBe(true);
+  });
+
+  it('matches expanded episode regex formats in findAnimeToshoSubtitle for [Group] Show 06 [1080p]', async () => {
+    const result = await findAnimeToshoSubtitle(29999, 6, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
+  });
+
+  it('correctly parses various episode numbering conventions with parseEpisodeNumber', () => {
+    expect(parseEpisodeNumber('[Group] Show 06 [1080p].mkv')).toBe(6);
+    expect(parseEpisodeNumber('Show Episode 06.mkv')).toBe(6);
+    expect(parseEpisodeNumber('Show Ep 06.mkv')).toBe(6);
+    expect(parseEpisodeNumber('Show ep 06.mkv')).toBe(6);
+    expect(parseEpisodeNumber('[Group] Show - 06v2 [1080p].mkv')).toBe(6);
+    expect(parseEpisodeNumber('[Group] Show - 06v2.mkv')).toBe(6);
+    expect(parseEpisodeNumber('Show - 06.mkv')).toBe(6);
+    expect(parseEpisodeNumber('Show S01E06.mkv')).toBe(6);
+    expect(parseEpisodeNumber('[Group] Show - 06 (1080p).mkv')).toBe(6);
+    expect(parseEpisodeNumber('[Group] Show - 06 [1080p].mkv')).toBe(6);
+    expect(parseEpisodeNumber('Random Title Without Episode.mkv')).toBeNull();
   });
 });
 

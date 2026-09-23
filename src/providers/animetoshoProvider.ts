@@ -26,14 +26,17 @@ interface ToshoTorrentDetail {
   files: ToshoFile[] | null;
 }
 
-const EPISODE_PATTERNS = [
+export const EPISODE_PATTERNS = [
   /S\d{1,2}E(\d{1,4})/i,
   /-\s*(\d{1,4})\s*\(/,
   /-\s*(\d{1,4})\s*\[/,
+  /\s+(\d{1,4})\s*\[/i,
+  /\b(?:ep|episode)\s*(\d{1,4})\b/i,
+  /-\s*(\d{1,4})v\d\b/i,
   /-\s*(\d{1,4})(?:\.[a-z0-9]+)?\s*$/i,
 ];
 
-function parseEpisodeNumber(title: string): number | null {
+export function parseEpisodeNumber(title: string): number | null {
   for (const pattern of EPISODE_PATTERNS) {
     const match = title.match(pattern);
     if (match) return parseInt(match[1], 10);
@@ -60,10 +63,11 @@ export interface AnimeToshoOptions {
   feedBaseUrl?: string;
   storageBaseUrl?: string;
   timeoutMs?: number;
+  title?: string | null;
 }
 
 export async function findAnimeToshoSubtitle(
-  anidbId: number,
+  anidbId: number | null,
   episode: number,
   lang: string,
   opts: AnimeToshoOptions = {},
@@ -72,43 +76,72 @@ export async function findAnimeToshoSubtitle(
   const storageBaseUrl = (opts.storageBaseUrl ?? 'https://animetosho.org').replace(/\/+$/, '');
   const timeoutMs = opts.timeoutMs ?? 8000;
 
-  const results = await fetchJson<ToshoSearchResult[]>(
-    `${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`,
-    { timeoutMs },
-  );
+  let results: ToshoSearchResult[] = [];
+
+  if (anidbId !== null) {
+    results = await fetchJson<ToshoSearchResult[]>(
+      `${feedBaseUrl}/json?t=search&aid=${anidbId}&q=${episode}&limit=50`,
+      { timeoutMs },
+    );
+  }
+
+  if (results.length === 0 && opts.title) {
+    const cleanTitle = opts.title.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanTitle) {
+      results = await fetchJson<ToshoSearchResult[]>(
+        `${feedBaseUrl}/json?t=search&q=${encodeURIComponent(`${cleanTitle} ${episode}`)}&limit=50`,
+        { timeoutMs },
+      );
+    }
+  }
 
   if (results.length === 0) {
     return { found: false, seriesNotFound: true };
   }
 
-  const candidates = results.filter(
-    (r) => r.status === 'complete' && r.num_files === 1 && parseEpisodeNumber(r.title) === episode,
-  );
+  const candidates = results.filter((r) => r.status === 'complete');
 
   for (const candidate of candidates) {
-    const detail = await fetchJson<ToshoTorrentDetail>(
-      `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
-      { timeoutMs },
-    );
-    if (!detail.files) continue;
+    let targetFile: ToshoFile | undefined;
 
-    for (const file of detail.files) {
-      const attachment = file.attachments?.find(
-        (a) => a.type === 'subtitle' && a.info?.lang === lang,
+    if (candidate.num_files === 1) {
+      if (parseEpisodeNumber(candidate.title) !== episode) {
+        continue;
+      }
+      const detail = await fetchJson<ToshoTorrentDetail>(
+        `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
+        { timeoutMs },
       );
-      if (!attachment?.info?.codec || attachment.info.tracknum === undefined) continue;
+      if (!detail.files || detail.files.length === 0) continue;
+      targetFile = detail.files[0];
+    } else if (candidate.num_files > 1) {
+      const detail = await fetchJson<ToshoTorrentDetail>(
+        `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
+        { timeoutMs },
+      );
+      if (!detail.files || detail.files.length === 0) continue;
+      targetFile = detail.files.find((f) => parseEpisodeNumber(f.filename) === episode);
+      if (!targetFile) continue;
+    } else {
+      continue;
+    }
 
+    const subtitleAttachments = (targetFile.attachments ?? []).filter(
+      (a) => a.type === 'subtitle' && a.info?.lang === lang && a.info?.codec && a.info.tracknum !== undefined,
+    );
+
+    for (const attachment of subtitleAttachments) {
       const url = buildAttachmentUrl(
         storageBaseUrl,
         attachment.id,
-        file.filename,
-        attachment.info.tracknum,
+        targetFile.filename,
+        attachment.info!.tracknum!,
         lang,
-        attachment.info.codec,
+        attachment.info!.codec!,
       );
       const compressed = await fetchBuffer(url, { timeoutMs });
       const decompressed = await decompressXz(compressed);
-      const codecLower = attachment.info.codec.toLowerCase();
+      const codecLower = attachment.info!.codec!.toLowerCase();
       const ext = codecLower === 'ass' || codecLower === 'ssa' ? 'ass' : 'srt';
       const vttContent = await convertToVtt(decompressed, ext, lang);
       if (!isAcceptableSubtitle(vttContent, lang)) {

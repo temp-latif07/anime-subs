@@ -336,6 +336,15 @@ describe('CacheStore', () => {
     expect(store.get(key)!.status).toBe('ready');
   });
 
+  it('clears stale tier/filePath when a ready entry transitions back to pending', () => {
+    store.setReady(key, 2, 'WEBVTT\n\n1\nold content');
+    store.setPending(key);
+    const entry = store.get(key)!;
+    expect(entry.status).toBe('pending');
+    expect(entry.tier).toBeNull();
+    expect(entry.filePath).toBeNull();
+  });
+
   it('tracks and clears in-flight work per key', () => {
     expect(store.getInFlight(key)).toBeUndefined();
     const promise = Promise.resolve({ found: true, vttContent: 'x' });
@@ -430,7 +439,7 @@ export class CacheStore {
   setPending(key: CacheKey): void {
     this.db.prepare(`
       INSERT INTO cache (key, status, tier, file_path, updated_at) VALUES (?, 'pending', NULL, NULL, ?)
-      ON CONFLICT(key) DO UPDATE SET status = 'pending', updated_at = excluded.updated_at
+      ON CONFLICT(key) DO UPDATE SET status = 'pending', tier = NULL, file_path = NULL, updated_at = excluded.updated_at
     `).run(keyId(key), Date.now());
   }
 
@@ -477,7 +486,7 @@ export class CacheStore {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run test/cache/cacheStore.test.ts`
-Expected: PASS (7 tests)
+Expected: PASS (8 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -2406,7 +2415,7 @@ Expected: PASS (5 tests)
 - [ ] **Step 5: Run the full test suite**
 
 Run: `npm test`
-Expected: PASS — all tests from Tasks 1-13 (roughly 56 tests across all files).
+Expected: PASS — all tests from Tasks 1-13 (roughly 57 tests across all files).
 
 - [ ] **Step 6: Verify the TypeScript build itself is clean**
 

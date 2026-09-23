@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from './config.js';
 import { AnimeDataset, downloadDataset } from './resolver/animeDataset.js';
@@ -14,6 +15,7 @@ const DATASET_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 async function main() {
   const config = loadConfig();
+  mkdirSync(config.dataDir, { recursive: true });
 
   const datasetDb = new Database(join(config.dataDir, 'anime-dataset.db'));
   const datasetHolder: DatasetHolder = { current: AnimeDataset.buildFromRaw(await downloadDataset(), datasetDb) };

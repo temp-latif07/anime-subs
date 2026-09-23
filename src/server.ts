@@ -7,6 +7,11 @@ import type { CacheStore } from './cache/cacheStore.js';
 export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStore): Express {
   const app = express();
 
+  app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+  });
+
   app.get('/manifest.json', (_req, res) => {
     res.json(manifest);
   });

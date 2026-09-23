@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeVtt } from './vttUtils.js';
+import { convertAssToVtt } from './assUtils.js';
 
 function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -36,31 +37,53 @@ export async function extractSubtitleToVtt(
   timeoutMs = 900000,
 ): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'animesubs-extract-'));
-  const outPath = join(dir, 'out.vtt');
+  const outAssPath = join(dir, 'out.ass');
   const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
   const httpArgs = isHttp
     ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']
     : [];
 
   try {
-    await runFfmpeg(
-      [
-        '-v', 'error',
-        '-probesize', '1M',
-        '-analyzeduration', '1M',
-        ...httpArgs,
-        '-i', sourceUrl,
-        '-map', `0:${streamIndex}`,
-        '-vn',
-        '-an',
-        '-dn',
-        '-c:s', 'webvtt',
-        '-y',
-        outPath,
-      ],
-      timeoutMs,
-    );
-    return normalizeVtt(readFileSync(outPath, 'utf-8'));
+    try {
+      await runFfmpeg(
+        [
+          '-v', 'error',
+          '-probesize', '1M',
+          '-analyzeduration', '1M',
+          ...httpArgs,
+          '-i', sourceUrl,
+          '-map', `0:${streamIndex}`,
+          '-vn',
+          '-an',
+          '-dn',
+          '-c:s', 'ass',
+          '-y',
+          outAssPath,
+        ],
+        timeoutMs,
+      );
+      return convertAssToVtt(readFileSync(outAssPath, 'utf-8'));
+    } catch {
+      const outVttPath = join(dir, 'out.vtt');
+      await runFfmpeg(
+        [
+          '-v', 'error',
+          '-probesize', '1M',
+          '-analyzeduration', '1M',
+          ...httpArgs,
+          '-i', sourceUrl,
+          '-map', `0:${streamIndex}`,
+          '-vn',
+          '-an',
+          '-dn',
+          '-c:s', 'webvtt',
+          '-y',
+          outVttPath,
+        ],
+        timeoutMs,
+      );
+      return normalizeVtt(readFileSync(outVttPath, 'utf-8'));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -71,6 +94,9 @@ export async function convertToVtt(
   inputExt: 'ass' | 'srt',
   timeoutMs = 30000,
 ): Promise<string> {
+  if (inputExt === 'ass') {
+    return convertAssToVtt(inputContent.toString('utf-8'));
+  }
   const dir = mkdtempSync(join(tmpdir(), 'animesubs-convert-'));
   const inPath = join(dir, `in.${inputExt}`);
   const outPath = join(dir, 'out.vtt');

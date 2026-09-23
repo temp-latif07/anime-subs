@@ -1,3 +1,63 @@
+import { assColorToHex } from './assUtils.js';
+
+function finalizeCue(
+  timing: string,
+  rawTextLines: string[],
+): { timing: string; textLines: string[] } | null {
+  let isTop = false;
+  const processedLines: string[] = [];
+
+  for (const rawLine of rawTextLines) {
+    let line = rawLine;
+    if (/\{[^}]*\\?an[789][^}]*\}/i.test(line)) {
+      isTop = true;
+      line = line.replace(/\{[^}]*\\?an[789][^}]*\}/gi, '');
+    }
+
+    // Translate {c&H...} or {\c&H...}
+    let openFont = false;
+    line = line.replace(/\{?\\?1?c(&?[hH]?[0-9a-fA-F]+&?)\}?/gi, (_, colorCode) => {
+      const hex = assColorToHex(colorCode);
+      const prefix = openFont ? '</font>' : '';
+      if (hex && hex !== '#FFFFFF') {
+        openFont = true;
+        return `${prefix}<font color="${hex}">`;
+      }
+      openFont = false;
+      return prefix;
+    });
+    if (openFont) {
+      line += '</font>';
+    }
+
+    // Strip remaining residual {...}
+    line = line.replace(/\{[^}]*\}/g, '').trim();
+    if (line) processedLines.push(line);
+  }
+
+  if (processedLines.length === 0) return null;
+
+  // Dual speaker detection
+  let textLines = processedLines;
+  if (processedLines.length > 1) {
+    const hasDifferentColors =
+      processedLines.some((l) => l.includes('<font')) &&
+      processedLines[0].match(/color="([^"]+)"/)?.[1] !==
+        processedLines[1].match(/color="([^"]+)"/)?.[1];
+    const hasExistingDash = processedLines.some((l) => l.startsWith('- '));
+    if (hasDifferentColors || hasExistingDash) {
+      textLines = processedLines.map((l) => (l.startsWith('- ') ? l : `- ${l}`));
+    }
+  }
+
+  let finalTiming = timing;
+  if (isTop && !finalTiming.includes('line:')) {
+    finalTiming += ' line:10%';
+  }
+
+  return { timing: finalTiming, textLines };
+}
+
 export function normalizeVtt(vtt: string): string {
   if (!vtt || typeof vtt !== 'string') return 'WEBVTT\n\n';
   if (!vtt.includes('-->')) return vtt;
@@ -17,6 +77,20 @@ export function normalizeVtt(vtt: string): string {
     return `${h}:${m}:${secondsAndMillis}`;
   }
 
+  function flushCue(): void {
+    if (!currentTiming) return;
+    const finalized = finalizeCue(currentTiming, currentCueText);
+    if (finalized) {
+      result.push(String(cueIndex++));
+      result.push(finalized.timing);
+      result.push(...finalized.textLines);
+      result.push('');
+    }
+    currentTiming = '';
+    currentCueText = [];
+    inCue = false;
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trimEnd();
     if (line === 'WEBVTT' || line.startsWith('WEBVTT ') || line.startsWith('NOTE') || line.startsWith('STYLE')) {
@@ -24,13 +98,7 @@ export function normalizeVtt(vtt: string): string {
     }
     const match = line.match(timingRegex);
     if (match) {
-      if (currentTiming) {
-        result.push(String(cueIndex++));
-        result.push(currentTiming);
-        result.push(...currentCueText);
-        result.push('');
-        currentCueText = [];
-      }
+      flushCue();
       const start = formatTimestamp(match[1], match[2], match[3]);
       const end = formatTimestamp(match[4], match[5], match[6]);
       const settings = match[7] ? match[7].trim() : '';
@@ -38,27 +106,14 @@ export function normalizeVtt(vtt: string): string {
       inCue = true;
     } else if (inCue) {
       if (line === '') {
-        if (currentTiming) {
-          result.push(String(cueIndex++));
-          result.push(currentTiming);
-          result.push(...currentCueText);
-          result.push('');
-          currentTiming = '';
-          currentCueText = [];
-          inCue = false;
-        }
+        flushCue();
       } else {
         currentCueText.push(line);
       }
     }
   }
 
-  if (currentTiming) {
-    result.push(String(cueIndex++));
-    result.push(currentTiming);
-    result.push(...currentCueText);
-    result.push('');
-  }
+  flushCue();
 
   return result.join('\n');
 }

@@ -1,8 +1,14 @@
 import { spawn } from 'node:child_process';
 
+export interface FoundSubtitleStream {
+  index: number;
+  codec: string;
+}
+
 interface FfprobeStream {
   index: number;
-  tags?: { language?: string };
+  codec_name?: string;
+  tags?: { language?: string; title?: string };
 }
 interface FfprobeOutput {
   streams: FfprobeStream[];
@@ -39,17 +45,22 @@ export function runCommand(command: string, args: string[], timeoutMs: number): 
   });
 }
 
-export async function findSubtitleStreamIndex(
+export async function findSubtitleStream(
   sourceUrl: string,
   lang: string,
   timeoutMs = 30000,
-): Promise<number | null> {
+): Promise<FoundSubtitleStream | null> {
   const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
   const httpArgs = isHttp
     ? [
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        '-reconnect_delay_max', '2',
+        '-reconnect_on_network_error', '1',
+        '-multiple_requests', '1',
+        '-short_seek_size', '2097152',
+        '-tcp_nodelay', '1',
+        '-recv_buffer_size', '4194304',
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       ]
     : [];
@@ -73,8 +84,21 @@ export async function findSubtitleStreamIndex(
   const matching = streams.filter((s) => s.tags?.language === lang);
   if (matching.length === 0) return null;
   const dialogue = matching.find((s) => {
-    const title = ((s.tags as any)?.title ?? '').toLowerCase();
+    const title = (s.tags?.title ?? '').toLowerCase();
     return !title.includes('sign') && !title.includes('song');
   });
-  return (dialogue ?? matching[0]).index;
+  const selected = dialogue ?? matching[0];
+  return {
+    index: selected.index,
+    codec: (selected.codec_name ?? 'ass').toLowerCase(),
+  };
+}
+
+export async function findSubtitleStreamIndex(
+  sourceUrl: string,
+  lang: string,
+  timeoutMs = 30000,
+): Promise<number | null> {
+  const result = await findSubtitleStream(sourceUrl, lang, timeoutMs);
+  return result?.index ?? null;
 }

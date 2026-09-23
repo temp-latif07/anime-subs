@@ -1,5 +1,5 @@
 import { getPlayableStreamUrls } from './streamAddonClient.js';
-import { findSubtitleStreamIndex } from '../ffmpeg/probe.js';
+import { findSubtitleStream } from '../ffmpeg/probe.js';
 import { extractSubtitleToVtt } from '../ffmpeg/extract.js';
 import type { ExtractionQueue } from '../queue/extractionQueue.js';
 import type { ProviderResult } from '../types.js';
@@ -28,15 +28,16 @@ export async function runExtractionTier(params: ExtractionParams): Promise<Provi
   return params.queue.run(async () => {
     for (const streamUrl of streamUrls) {
       try {
-        const streamIndex = await findSubtitleStreamIndex(
+        const stream = await findSubtitleStream(
           streamUrl,
           params.lang,
           params.extractionTimeoutMs,
         );
-        if (streamIndex === null) continue;
+        if (stream === null) continue;
         const vttContent = await extractSubtitleToVtt(
           streamUrl,
-          streamIndex,
+          stream.index,
+          stream.codec,
           params.extractionTimeoutMs,
         );
         return { found: true, vttContent };

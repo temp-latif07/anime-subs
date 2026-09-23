@@ -34,63 +34,65 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
 export async function extractSubtitleToVtt(
   sourceUrl: string,
   streamIndex: number,
-  timeoutMs = 900000,
+  codecOrTimeout?: string | number,
+  maybeTimeoutMs?: number,
 ): Promise<string> {
+  const codec = typeof codecOrTimeout === 'string' ? codecOrTimeout.toLowerCase() : undefined;
+  const timeoutMs = typeof codecOrTimeout === 'number'
+    ? codecOrTimeout
+    : (maybeTimeoutMs ?? 900000);
+
   const dir = mkdtempSync(join(tmpdir(), 'animesubs-extract-'));
-  const outAssPath = join(dir, 'out.ass');
   const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
   const httpArgs = isHttp
     ? [
         '-reconnect', '1',
         '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
+        '-reconnect_delay_max', '2',
+        '-reconnect_on_network_error', '1',
+        '-multiple_requests', '1',
+        '-short_seek_size', '2097152',
+        '-tcp_nodelay', '1',
+        '-recv_buffer_size', '4194304',
         '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       ]
     : [];
 
+  const baseArgs = [
+    '-v', 'error',
+    '-probesize', '1M',
+    '-analyzeduration', '500k',
+    ...httpArgs,
+    '-i', sourceUrl,
+    '-map', `0:${streamIndex}`,
+    '-vn',
+    '-an',
+    '-dn',
+  ];
+
   try {
-    try {
-      await runFfmpeg(
-        [
-          '-v', 'error',
-          '-probesize', '1M',
-          '-analyzeduration', '500k',
-          '-fflags', '+fastseek',
-          ...httpArgs,
-          '-i', sourceUrl,
-          '-map', `0:${streamIndex}`,
-          '-vn',
-          '-an',
-          '-dn',
-          '-c:s', 'ass',
-          '-y',
-          outAssPath,
-        ],
-        timeoutMs,
-      );
-      return convertAssToVtt(readFileSync(outAssPath, 'utf-8'));
-    } catch {
-      const outVttPath = join(dir, 'out.vtt');
-      await runFfmpeg(
-        [
-          '-v', 'error',
-          '-probesize', '1M',
-          '-analyzeduration', '500k',
-          '-fflags', '+fastseek',
-          ...httpArgs,
-          '-i', sourceUrl,
-          '-map', `0:${streamIndex}`,
-          '-vn',
-          '-an',
-          '-dn',
-          '-c:s', 'webvtt',
-          '-y',
-          outVttPath,
-        ],
-        timeoutMs,
-      );
-      return normalizeVtt(readFileSync(outVttPath, 'utf-8'));
+    if (codec === 'ass' || codec === 'ssa') {
+      const outAssPath = join(dir, 'out.ass');
+      try {
+        await runFfmpeg([...baseArgs, '-c:s', 'copy', '-y', outAssPath], timeoutMs);
+        return convertAssToVtt(readFileSync(outAssPath, 'utf-8'));
+      } catch {
+        // Fall back to transcoding below
+      }
+    } else if (codec === 'subrip' || codec === 'srt') {
+      const outSrtPath = join(dir, 'out.srt');
+      try {
+        await runFfmpeg([...baseArgs, '-c:s', 'copy', '-y', outSrtPath], timeoutMs);
+        return convertToVtt(readFileSync(outSrtPath), 'srt');
+      } catch {
+        // Fall back to transcoding below
+      }
     }
+
+    // Default or fallback: transcode to WebVTT directly
+    const outVttPath = join(dir, 'out.vtt');
+    await runFfmpeg([...baseArgs, '-c:s', 'webvtt', '-y', outVttPath], timeoutMs);
+    return normalizeVtt(readFileSync(outVttPath, 'utf-8'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

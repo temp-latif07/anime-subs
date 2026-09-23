@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { normalizeVtt } from '../ffmpeg/vttUtils.js';
 import type { CacheKey, CacheEntry, CacheStatus, ProviderResult } from '../types.js';
 
 function keyId(key: CacheKey): string {
@@ -45,7 +46,8 @@ export class CacheStore {
   setReady(key: CacheKey, tier: 1 | 2 | 3, vttContent: string): string {
     const id = keyId(key);
     const filePath = join(this.filesDir, `${id.replace(/:/g, '_')}.vtt`);
-    writeFileSync(filePath, vttContent, 'utf-8');
+    const normalized = normalizeVtt(vttContent);
+    writeFileSync(filePath, normalized, 'utf-8');
     this.db.prepare(`
       INSERT INTO cache (key, status, tier, file_path, updated_at) VALUES (?, 'ready', ?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET status = 'ready', tier = excluded.tier, file_path = excluded.file_path, updated_at = excluded.updated_at

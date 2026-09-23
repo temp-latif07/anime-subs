@@ -112,4 +112,25 @@ describe('HTTP contract', () => {
     const res = await fetch(`${baseUrl}/vtt/1/1/eng.vtt`);
     expect(res.status).toBe(404);
   });
+
+  it('awaits in-flight extraction and serves the completed normalized VTT directly', async () => {
+    const key = { anilistId: 154587, episode: 7, lang: 'eng' };
+    cache.setPending(key);
+    let resolveJob!: () => void;
+    const inFlightJob = new Promise<any>((resolve) => {
+      resolveJob = () => {
+        cache.setReady(key, 3, 'WEBVTT\n\n00:01.000 --> 00:03.000\nIn flight complete\n');
+        resolve({ found: true, vttContent: 'WEBVTT\n\n00:01.000 --> 00:03.000\nIn flight complete\n' });
+      };
+    });
+    cache.setInFlight(key, inFlightJob);
+    setTimeout(() => resolveJob(), 50);
+
+    const res = await fetch(`${baseUrl}/vtt/154587/7/eng.vtt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('public');
+    const text = await res.text();
+    expect(text).toContain('00:00:01.000 --> 00:00:03.000');
+    expect(text).toContain('In flight complete');
+  });
 });

@@ -3,17 +3,25 @@ import { readFileSync, existsSync } from 'node:fs';
 import { manifest } from './manifest.js';
 import { handleSubtitlesRequest, type SubtitlesHandlerDeps } from './subtitlesHandler.js';
 import type { CacheStore } from './cache/cacheStore.js';
+import { normalizeVtt } from './ffmpeg/vttUtils.js';
 
 export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStore): Express {
   const app = express();
 
   app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Expose-Headers', '*');
     const start = Date.now();
     res.on('finish', () => {
       console.log(`[HTTP] ${req.method} ${req.originalUrl} ${res.statusCode} (${Date.now() - start}ms)`);
     });
     next();
+  });
+
+  app.options('{*path}', (_req, res) => {
+    res.sendStatus(204);
   });
 
   app.get('/manifest.json', (_req, res) => {
@@ -44,19 +52,37 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
     }
   });
 
-  app.get('/vtt/:anilistId/:episode/:lang.vtt', (req, res) => {
+  app.get('/vtt/:anilistId/:episode/:lang.vtt', async (req, res) => {
     const key = {
       anilistId: parseInt(req.params.anilistId, 10),
       episode: parseInt(req.params.episode, 10),
       lang: req.params.lang,
     };
-    const entry = cache.get(key);
+    let entry = cache.get(key);
+
+    const inFlight = cache.getInFlight(key);
+    if (inFlight) {
+      try {
+        await Promise.race([
+          inFlight,
+          new Promise((resolve) => setTimeout(resolve, 15000)),
+        ]);
+      } catch {
+        // extraction finished or failed; re-check cache below
+      }
+      entry = cache.get(key);
+    }
+
     res.type('text/vtt');
 
     if (entry?.status === 'ready' && entry.filePath && existsSync(entry.filePath)) {
-      res.send(readFileSync(entry.filePath, 'utf-8'));
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      const content = readFileSync(entry.filePath, 'utf-8');
+      res.send(normalizeVtt(content));
       return;
     }
+
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     if (entry?.status === 'pending') {
       res.send('WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\nExtracting subtitles -- reselect this track in about a minute.\n');
       return;

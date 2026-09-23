@@ -1,0 +1,37 @@
+import { describe, it, expect } from 'vitest';
+import { normalizeVtt } from '../../src/ffmpeg/vttUtils.js';
+
+describe('normalizeVtt', () => {
+  it('normalizes MM:SS.mmm timestamps to HH:MM:SS.mmm and adds cue numbers', () => {
+    const raw = 'WEBVTT\n\n00:04.630 --> 00:06.250\nHmm.\n\n00:06.250 --> 00:07.230\nWhat\'s wrong?\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).toBe(
+      'WEBVTT\n\n' +
+      '1\n00:00:04.630 --> 00:00:06.250\nHmm.\n\n' +
+      '2\n00:00:06.250 --> 00:00:07.230\nWhat\'s wrong?\n'
+    );
+  });
+
+  it('preserves existing hours in timestamps and existing settings', () => {
+    const raw = 'WEBVTT\n\n01:22:11.720 --> 01:22:12.660 line:90%\nGood night.\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).toBe(
+      'WEBVTT\n\n' +
+      '1\n01:22:11.720 --> 01:22:12.660 line:90%\nGood night.\n'
+    );
+  });
+
+  it('handles multiline cue texts and re-indexes cues cleanly', () => {
+    const raw = 'WEBVTT\n\n999\n00:08.270 --> 00:11.580\nThe milk tea\nstill seems cold.\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).toBe(
+      'WEBVTT\n\n' +
+      '1\n00:00:08.270 --> 00:00:11.580\nThe milk tea\nstill seems cold.\n'
+    );
+  });
+
+  it('handles empty or non-string inputs safely', () => {
+    expect(normalizeVtt('')).toBe('WEBVTT\n\n');
+    expect(normalizeVtt(null as any)).toBe('WEBVTT\n\n');
+  });
+});

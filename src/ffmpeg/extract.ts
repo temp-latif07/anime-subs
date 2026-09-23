@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { normalizeVtt } from './vttUtils.js';
 
 function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -41,7 +42,7 @@ export async function extractSubtitleToVtt(
       ['-v', 'error', '-i', sourceUrl, '-map', `0:${streamIndex}`, '-c:s', 'webvtt', outPath],
       timeoutMs,
     );
-    return readFileSync(outPath, 'utf-8');
+    return normalizeVtt(readFileSync(outPath, 'utf-8'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -58,7 +59,7 @@ export async function convertToVtt(
   try {
     writeFileSync(inPath, inputContent);
     await runFfmpeg(['-v', 'error', '-i', inPath, outPath], timeoutMs);
-    return readFileSync(outPath, 'utf-8');
+    return normalizeVtt(readFileSync(outPath, 'utf-8'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

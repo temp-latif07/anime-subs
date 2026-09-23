@@ -99,20 +99,26 @@ live network dependency on the request path.
 
 ### Jimaku provider (tier 1)
 Queries the Jimaku API for the resolved AniList id + episode number,
-filtered to the configured target language(s). Requires a user-supplied
-Jimaku API key (env var). *Exact endpoint/response shape to be confirmed
-against Jimaku's live API docs during implementation* — the design
-commits to "AniList id + episode number in, a subtitle file URL out,"
-not to specific field names.
+filtered to the configured target language(s) by filename heuristic (see
+API reference below — Jimaku has no structured language field). Requires
+a user-supplied Jimaku API key (env var).
+
+**Caveat, confirmed against Jimaku's live OpenAPI spec:** Jimaku is
+primarily a Japanese-subtitle archive for language learners. Entries and
+files carry no language field at all — English (or other non-Japanese)
+files exist but are the minority, identifiable only by filename
+convention. Expect a low hit rate for English specifically; it's kept as
+tier 1 because it's fast and free when it does hit, not because it's
+expected to be the main source of coverage.
 
 ### AnimeTosho provider (tier 2)
-Searches AnimeTosho's JSON feed (`feed.animetosho.org/json?t=search`) by
-AniDB id/title, finds a matching episode release, and resolves its
-already-extracted subtitle attachment to a direct download URL
-(`storage.animetosho.org/attach/...`). *Exact per-torrent attachment
-listing shape to be confirmed against the live API during
-implementation* (search was verified live; the attachment-linking
-response was not).
+Searches AnimeTosho's JSON feed by AniDB anime id, finds a matching
+episode release, and resolves its already-extracted subtitle attachment
+to a direct (redirect-following) download URL. This is the primary
+source of English coverage for anime that had any scene/simulcast
+release at all — see API reference below for the fully verified request/
+response shapes and URL construction, confirmed end-to-end against a
+live example.
 
 ### Extraction fallback (tier 3)
 Runs only when tiers 1–2 return nothing:
@@ -253,10 +259,50 @@ interpolation, configured URLs validated at startup, and the HTTP
 surface limited to the documented manifest/subtitles endpoints (this is
 not built as a general-purpose URL-fetching proxy).
 
-## Open implementation-time verifications
+## External API reference (verified live)
 
-- Confirm Jimaku's exact API request/response shape (search by AniList
-  id, list files for an entry, language field) against live docs.
-- Confirm AnimeTosho's per-torrent attachment-listing response shape
-  (linking a release to its extracted subtitle attachment id) against a
-  live example.
+### Jimaku (`https://jimaku.cc`)
+
+Confirmed against the live OpenAPI spec at `/api/openapi.json`. Auth: all
+requests carry an `Authorization: <JIMAKU_API_KEY>` header.
+
+- `GET /api/entries/search?anilist_id={id}` → `Entry[]`:
+  `{ id: number, name: string, english_name: string|null,
+  anilist_id: number|null, flags: { anime, movie, adult, external,
+  unverified: boolean }, ... }`. Pick the first entry where
+  `flags.anime` is true and `flags.adult` is false.
+- `GET /api/entries/{entryId}/files?episode={n}` → `FileEntry[]`:
+  `{ name: string, size: number, url: string, last_modified: string }`.
+  No language field — filter `name` case-insensitively: accept files
+  whose name contains `english` or a bracketed/standalone `en`/`eng`
+  token (e.g. `/\b(eng(lish)?)\b/i` or `\[en\]`), and whose extension is
+  `.srt`, `.ass`, or `.vtt`; reject names containing `japanese`, `jpn`,
+  or `jp` tokens. `url` is a direct, ready-to-fetch download link.
+
+### AnimeTosho (`https://feed.animetosho.org`, `https://animetosho.org`)
+
+Confirmed live end-to-end (search → torrent detail → attachment
+download → decompressed content) against a real release.
+
+- `GET https://feed.animetosho.org/json?t=search&aid={anidbAid}&limit=50`
+  → array of torrent summaries:
+  `{ id: number, title: string, status: "complete"|"skipped"|..,
+  anidb_aid: number, anidb_eid: number|null, num_files: number, ... }`.
+  Keep `status === "complete"`; parse the episode number out of `title`
+  (anime release titles commonly encode it as `- NN`, `SxxEyy`, or
+  `Season N ... - NN`); prefer `num_files === 1` (a single-episode
+  release, not a batch) matching the target episode.
+- `GET https://feed.animetosho.org/json?show=torrent&id={torrentId}` →
+  torrent detail with `files[].attachments[]`, each:
+  `{ id: number, type: "subtitle"|"font"|"tags"|"other",
+  info: { codec: string, lang: string, name: string, tracknum: number,
+  ... }, size: number }`. Find the attachment where `type === "subtitle"`
+  and `info.lang` matches the target language (ISO 639-2, e.g. `"eng"`).
+- Download URL (verified, 301-redirects, response body is XZ-compressed
+  text — decompress before use):
+  `https://animetosho.org/storage/attach/{id8}/{encodeURIComponent(videoFilenameWithoutExt)}_track{attachment.info.tracknum}.{attachment.info.lang}.{attachment.info.codec.toLowerCase()}.xz`
+  where `id8` is the attachment's numeric `id` formatted as 8-digit
+  lowercase hex (`id.toString(16).padStart(8, '0')`), and
+  `videoFilenameWithoutExt` is the parent file's `filename` field with
+  its extension stripped. `attachment.info.codec` for a `.ass` track is
+  the literal string `"ASS"` (lowercased to `ass` for the URL).

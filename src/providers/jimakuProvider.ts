@@ -52,7 +52,7 @@ export async function findJimakuSubtitle(
     { headers: { Authorization: apiKey }, timeoutMs },
   );
   const entry = entries.find((e) => e.flags?.anime && !e.flags?.adult);
-  if (!entry) return { found: false };
+  if (!entry) return { found: false, seriesNotFound: true };
 
   const files = await fetchJson<JimakuFile[]>(
     `${baseUrl}/api/entries/${entry.id}/files?episode=${episode}`,

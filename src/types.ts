@@ -16,6 +16,7 @@ export interface CacheEntry {
 export interface ProviderResult {
   found: boolean;
   vttContent?: string;
+  seriesNotFound?: boolean;
 }
 
 export interface SubtitleCandidate {

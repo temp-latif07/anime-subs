@@ -76,16 +76,33 @@ async function resolveOneLanguage(
 async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: SubtitlesHandlerDeps): Promise<boolean> {
   const timeoutOpts = { timeoutMs: deps.config.providerTimeoutMs };
 
-  const jimakuPromise = deps
-    .jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts)
-    .catch((err) => {
-      console.warn(`[Tier 1: Jimaku] Warning: ${(err as Error).message}`);
-      return { found: false } as ProviderResult;
-    });
+  const jimakuMissed = deps.cache.hasSeriesProviderMiss('jimaku', key.anilistId, deps.config.negativeCacheTtlHours);
+  const toshoMissed = anidbId === null || deps.cache.hasSeriesProviderMiss('animetosho', anidbId, deps.config.negativeCacheTtlHours);
 
-  const toshoPromise = anidbId !== null
+  const jimakuPromise = !jimakuMissed
     ? deps
-        .animetoshoProvider(anidbId, key.episode, key.lang, timeoutOpts)
+        .jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts)
+        .then((res) => {
+          if (res.seriesNotFound) {
+            deps.cache.setSeriesProviderMiss('jimaku', key.anilistId);
+          }
+          return res;
+        })
+        .catch((err) => {
+          console.warn(`[Tier 1: Jimaku] Warning: ${(err as Error).message}`);
+          return { found: false } as ProviderResult;
+        })
+    : Promise.resolve({ found: false } as ProviderResult);
+
+  const toshoPromise = !toshoMissed
+    ? deps
+        .animetoshoProvider(anidbId!, key.episode, key.lang, timeoutOpts)
+        .then((res) => {
+          if (res.seriesNotFound && anidbId !== null) {
+            deps.cache.setSeriesProviderMiss('animetosho', anidbId);
+          }
+          return res;
+        })
         .catch((err) => {
           console.warn(`[Tier 2: AnimeTosho] Warning: ${(err as Error).message}`);
           return { found: false } as ProviderResult;

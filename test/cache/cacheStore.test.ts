@@ -75,4 +75,12 @@ describe('CacheStore', () => {
     expect(store.get({ ...key, episode: 11 })).toBeNull();
     expect(store.get({ ...key, lang: 'spa' })).toBeNull();
   });
+
+  it('records and checks series-level provider negative cache with TTL', () => {
+    expect(store.hasSeriesProviderMiss('jimaku', 154587, 24)).toBe(false);
+    store.setSeriesProviderMiss('jimaku', 154587);
+    expect(store.hasSeriesProviderMiss('jimaku', 154587, 24)).toBe(true);
+    expect(store.hasSeriesProviderMiss('animetosho', 154587, 24)).toBe(false);
+    expect(store.hasSeriesProviderMiss('jimaku', 999999, 24)).toBe(false);
+  });
 });

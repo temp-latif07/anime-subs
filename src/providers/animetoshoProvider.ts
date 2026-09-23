@@ -76,6 +76,10 @@ export async function findAnimeToshoSubtitle(
     { timeoutMs },
   );
 
+  if (results.length === 0) {
+    return { found: false, seriesNotFound: true };
+  }
+
   const candidates = results.filter(
     (r) => r.status === 'complete' && r.num_files === 1 && parseEpisodeNumber(r.title) === episode,
   );

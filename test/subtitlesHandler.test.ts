@@ -176,4 +176,20 @@ describe('handleSubtitlesRequest', () => {
     expect(started).toEqual(['eng', 'spa']);
     await promise;
   });
+
+  it('skips Jimaku and AnimeTosho for subsequent episodes when series-level miss is recorded', async () => {
+    deps.jimakuProvider = vi.fn(async () => ({ found: false, seriesNotFound: true }));
+    deps.animetoshoProvider = vi.fn(async () => ({ found: false, seriesNotFound: true }));
+    deps.extractionProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nextracted' }));
+
+    // Episode 5 query
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(deps.jimakuProvider).toHaveBeenCalledTimes(1);
+    expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
+
+    // Episode 6 query
+    await handleSubtitlesRequest('kitsu:46474:1:6', deps);
+    expect(deps.jimakuProvider).toHaveBeenCalledTimes(1);
+    expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
+  });
 });

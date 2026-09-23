@@ -18,7 +18,7 @@ export interface SubtitlesHandlerDeps {
   config: Config;
   buildSubtitleUrl: (key: CacheKey) => string;
   jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>;
-  animetoshoProvider: (anidbId: number, episode: number, lang: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>;
+  animetoshoProvider: (anidbId: number | null, episode: number, lang: string, opts?: { timeoutMs?: number; title?: string | null }) => Promise<ProviderResult>;
   extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>;
 }
 
@@ -39,7 +39,7 @@ export async function handleSubtitlesRequest(
   const results = await Promise.all(
     deps.config.subtitleLanguages.map(async (lang) => {
       const key: CacheKey = { anilistId, episode: parsed.episode, lang };
-      const included = await resolveOneLanguage(key, ids.anidbId, parsed, deps, mediaType);
+      const included = await resolveOneLanguage(key, ids.anidbId, parsed, deps, mediaType, ids.title);
       return included ? { lang, url: deps.buildSubtitleUrl(key) } : null;
     }),
   );
@@ -53,6 +53,7 @@ async function resolveOneLanguage(
   parsed: { contentId: string; season: number; episode: number },
   deps: SubtitlesHandlerDeps,
   mediaType?: string,
+  title?: string | null,
 ): Promise<boolean> {
   const cached = deps.cache.get(key);
   if (cached?.status === 'ready') {
@@ -76,21 +77,28 @@ async function resolveOneLanguage(
     { timeoutMs: deps.config.providerTimeoutMs, mediaType },
   ).catch(() => []);
 
-  if (await tryFastTiers(key, anidbId, deps)) return true;
+  if (await tryFastTiers(key, anidbId, deps, title)) return true;
 
   startExtractionInBackground(key, parsed, deps, mediaType, streamUrlsPromise);
   return true;
 }
 
-async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: SubtitlesHandlerDeps): Promise<boolean> {
-  const timeoutOpts = { timeoutMs: deps.config.providerTimeoutMs };
+async function tryFastTiers(
+  key: CacheKey,
+  anidbId: number | null,
+  deps: SubtitlesHandlerDeps,
+  title?: string | null,
+): Promise<boolean> {
+  const timeoutOpts = { timeoutMs: deps.config.providerTimeoutMs, title };
 
   const jimakuMissed = deps.cache.hasSeriesProviderMiss('jimaku', key.anilistId, deps.config.negativeCacheTtlHours);
-  const toshoMissed = anidbId === null || deps.cache.hasSeriesProviderMiss('animetosho', anidbId, deps.config.negativeCacheTtlHours);
+  const toshoMissed = anidbId !== null
+    ? deps.cache.hasSeriesProviderMiss('animetosho', anidbId, deps.config.negativeCacheTtlHours)
+    : !title;
 
   const jimakuPromise = !jimakuMissed
     ? deps
-        .jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts)
+        .jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, { timeoutMs: deps.config.providerTimeoutMs })
         .then((res) => {
           if (res.seriesNotFound) {
             deps.cache.setSeriesProviderMiss('jimaku', key.anilistId);
@@ -105,7 +113,7 @@ async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: Subtitl
 
   const toshoPromise = !toshoMissed
     ? deps
-        .animetoshoProvider(anidbId!, key.episode, key.lang, timeoutOpts)
+        .animetoshoProvider(anidbId, key.episode, key.lang, timeoutOpts)
         .then((res) => {
           if (res.seriesNotFound && anidbId !== null) {
             deps.cache.setSeriesProviderMiss('animetosho', anidbId);
@@ -127,7 +135,7 @@ async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: Subtitl
   }
 
   if (tosho.found && tosho.vttContent) {
-    console.log(`[Tier 2: AnimeTosho] HIT for anidb:${anidbId} ep:${key.episode} (${key.lang})`);
+    console.log(`[Tier 2: AnimeTosho] HIT for ${anidbId !== null ? `anidb:${anidbId}` : `title:${title}`} ep:${key.episode} (${key.lang})`);
     deps.cache.setReady(key, 2, tosho.vttContent);
     return true;
   }

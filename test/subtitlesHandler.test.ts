@@ -11,7 +11,19 @@ import type { Config } from '../src/config.js';
 import type { ProviderResult } from '../src/types.js';
 
 const dataset = AnimeDataset.buildFromRaw({
-  data: [{ sources: ['https://anidb.net/anime/17617', 'https://anilist.co/anime/154587', 'https://kitsu.app/anime/46474'] }],
+  data: [
+    {
+      title: 'Sousou no Frieren',
+      sources: ['https://anidb.net/anime/17617', 'https://anilist.co/anime/154587', 'https://kitsu.app/anime/46474'],
+    },
+    {
+      title: 'No AniDB Anime',
+      sources: ['https://anilist.co/anime/200001', 'https://kitsu.app/anime/200001'],
+    },
+    {
+      sources: ['https://anilist.co/anime/300001', 'https://kitsu.app/anime/300001'],
+    },
+  ],
 }, new Database(':memory:'));
 
 const baseConfig: Config = {
@@ -205,4 +217,42 @@ describe('handleSubtitlesRequest', () => {
     expect(passedParams.streamUrls).toBeDefined();
     expect(passedParams.streamUrls instanceof Promise).toBe(true);
   });
+
+  it('passes resolved anime title to animetoshoProvider for fallback searching', async () => {
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(deps.animetoshoProvider).toHaveBeenCalledWith(
+      17617,
+      5,
+      'eng',
+      expect.objectContaining({ title: 'Sousou no Frieren' }),
+    );
+  });
+
+  it('runs animetoshoProvider when anidbId is null but title is present', async () => {
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho title hit' }));
+    const result = await handleSubtitlesRequest('kitsu:200001:1:1', deps);
+    expect(deps.animetoshoProvider).toHaveBeenCalledWith(
+      null,
+      1,
+      'eng',
+      expect.objectContaining({ title: 'No AniDB Anime' }),
+    );
+    expect(result.subtitles).toHaveLength(1);
+    expect(cache.get({ anilistId: 200001, episode: 1, lang: 'eng' })?.tier).toBe(2);
+  });
+
+  it('skips animetoshoProvider when anidbId is null and title is absent', async () => {
+    await handleSubtitlesRequest('kitsu:300001:1:1', deps);
+    expect(deps.animetoshoProvider).not.toHaveBeenCalled();
+  });
+
+  it('does not record series-level miss for animetosho when anidbId is null and provider reports seriesNotFound', async () => {
+    deps.animetoshoProvider = vi.fn(async () => ({ found: false, seriesNotFound: true }));
+    const spySetMiss = vi.spyOn(cache, 'setSeriesProviderMiss');
+    await handleSubtitlesRequest('kitsu:200001:1:1', deps);
+    expect(deps.animetoshoProvider).toHaveBeenCalled();
+    const toshoMissCalls = spySetMiss.mock.calls.filter((call) => call[0] === 'animetosho');
+    expect(toshoMissCalls).toHaveLength(0);
+  });
 });
+

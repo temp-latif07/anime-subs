@@ -122,4 +122,52 @@ Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,Actual text
     expect(vtt).not.toContain('m 0 0');
     expect(vtt).toContain('Actual text');
   });
+
+  it('strips Opening and Ending song styles and karaoke cues', () => {
+    const ass = `[Script Info]
+Title: Test
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: OP - Romaji,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
+Style: ED - English,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,OP - Romaji,,0,0,0,,{\\k20}A{\\k30}no {\\k40}hi {\\k50}mita {\\k60}hana
+Dialogue: 0,0:00:02.00,0:00:04.00,Default,,0,0,0,,Hello, how are you?
+Dialogue: 0,0:00:20.00,0:00:23.00,ED - English,,0,0,0,,Like a bird in the sky
+`;
+    const vtt = convertAssToVtt(ass, 'eng');
+    expect(vtt).toContain('Hello, how are you?');
+    expect(vtt).not.toContain('Ano hi mita');
+    expect(vtt).not.toContain('Like a bird in the sky');
+  });
+
+  it('filters out Japanese script lines from dual-language cues and drops pure Japanese cues', () => {
+    const ass = `[Script Info]
+Title: Test
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,こんにちは\\NHello there!
+Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,おはようございます
+Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,I am doing well.
+`;
+    const vtt = convertAssToVtt(ass, 'eng');
+    expect(vtt).toContain('Hello there!');
+    expect(vtt).not.toContain('こんにちは');
+    expect(vtt).not.toContain('おはようございます');
+    expect(vtt).toContain('I am doing well.');
+    // Check that there are only 2 cues, not 3
+    const cues = vtt.trim().split('\n\n').slice(1);
+    expect(cues.length).toBe(2);
+  });
 });

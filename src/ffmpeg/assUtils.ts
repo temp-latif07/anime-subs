@@ -40,7 +40,11 @@ interface AssCue {
   text: string;
 }
 
-export function convertAssToVtt(ass: string): string {
+export const JAPANESE_CHAR_REGEX = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\u3000-\u303F\uFF00-\uFFEF]/;
+const SONG_STYLE_REGEX = /^(op|ed|song|karaoke|lyrics|insert|music)\b|kanji|romaji/i;
+const KARAOKE_TAG_REGEX = /\{[^}]*\\k[f|o]?[0-9]+[^}]*\}/i;
+
+export function convertAssToVtt(ass: string, targetLang?: string): string {
   if (!ass || typeof ass !== 'string') return 'WEBVTT\n\n';
 
   const lines = ass.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
@@ -104,8 +108,14 @@ export function convertAssToVtt(ass: string): string {
 
         const start = parts[startIdx];
         const end = parts[endIdx];
-        const style = parts[styleIdx];
+        const style = parts[styleIdx] || '';
         let text = parts[textIdx] || '';
+
+        if (targetLang === 'eng') {
+          if (SONG_STYLE_REGEX.test(style) || KARAOKE_TAG_REGEX.test(text)) {
+            continue;
+          }
+        }
 
         // Strip drawing commands: {\p1}...{\p0} or unclosed {\p1}...
         text = text.replace(/\{[^}]*\\p[1-9][^}]*\}.*?(\{[^}]*\\p0[^}]*\}|$)/gis, '');
@@ -162,7 +172,8 @@ export function convertAssToVtt(ass: string): string {
             }
             return lineText;
           })
-          .filter(Boolean);
+          .filter(Boolean)
+          .filter((l) => (targetLang === 'eng' ? !JAPANESE_CHAR_REGEX.test(l) : true));
 
         if (processedLines.length === 0) continue;
 

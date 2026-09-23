@@ -58,4 +58,29 @@ describe('normalizeVtt', () => {
       '- <font color="#0000FF">Line B</font>'
     );
   });
+
+  it('strips Japanese lines from WebVTT cues when target language is English', () => {
+    const input = `WEBVTT
+
+1
+00:00:01.000 --> 00:00:03.000
+こんにちは
+Hello world!
+
+2
+00:00:04.000 --> 00:00:06.000
+さようなら
+
+3
+00:00:07.000 --> 00:00:09.000
+Goodbye!
+`;
+    const result = normalizeVtt(input, 'eng');
+    expect(result).toContain('Hello world!');
+    expect(result).not.toContain('こんにちは');
+    expect(result).not.toContain('さようなら');
+    expect(result).toContain('Goodbye!');
+    const cues = result.trim().split('\n\n').slice(1);
+    expect(cues.length).toBe(2);
+  });
 });

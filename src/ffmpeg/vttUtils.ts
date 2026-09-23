@@ -1,13 +1,19 @@
-import { assColorToHex } from './assUtils.js';
+import { assColorToHex, JAPANESE_CHAR_REGEX } from './assUtils.js';
 
 function finalizeCue(
   timing: string,
   rawTextLines: string[],
+  targetLang = 'eng',
 ): { timing: string; textLines: string[] } | null {
   let isTop = false;
   const processedLines: string[] = [];
 
-  for (const rawLine of rawTextLines) {
+  const linesToProcess =
+    targetLang === 'eng'
+      ? rawTextLines.filter((l) => !JAPANESE_CHAR_REGEX.test(l))
+      : rawTextLines;
+
+  for (const rawLine of linesToProcess) {
     let line = rawLine;
     if (/\{[^}]*\\?an[789][^}]*\}/i.test(line)) {
       isTop = true;
@@ -58,7 +64,7 @@ function finalizeCue(
   return { timing: finalTiming, textLines };
 }
 
-export function normalizeVtt(vtt: string): string {
+export function normalizeVtt(vtt: string, targetLang = 'eng'): string {
   if (!vtt || typeof vtt !== 'string') return 'WEBVTT\n\n';
   if (!vtt.includes('-->')) return vtt;
   const lines = vtt.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
@@ -79,7 +85,7 @@ export function normalizeVtt(vtt: string): string {
 
   function flushCue(): void {
     if (!currentTiming) return;
-    const finalized = finalizeCue(currentTiming, currentCueText);
+    const finalized = finalizeCue(currentTiming, currentCueText, targetLang);
     if (finalized) {
       result.push(String(cueIndex++));
       result.push(finalized.timing);

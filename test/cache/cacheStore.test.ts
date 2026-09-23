@@ -52,6 +52,15 @@ describe('CacheStore', () => {
     expect(store.get(key)!.status).toBe('ready');
   });
 
+  it('clears stale tier/filePath when a ready entry transitions back to pending', () => {
+    store.setReady(key, 2, 'WEBVTT\n\n1\nold content');
+    store.setPending(key);
+    const entry = store.get(key)!;
+    expect(entry.status).toBe('pending');
+    expect(entry.tier).toBeNull();
+    expect(entry.filePath).toBeNull();
+  });
+
   it('tracks and clears in-flight work per key', () => {
     expect(store.getInFlight(key)).toBeUndefined();
     const promise = Promise.resolve({ found: true, vttContent: 'x' });

@@ -38,7 +38,7 @@ export class CacheStore {
   setPending(key: CacheKey): void {
     this.db.prepare(`
       INSERT INTO cache (key, status, tier, file_path, updated_at) VALUES (?, 'pending', NULL, NULL, ?)
-      ON CONFLICT(key) DO UPDATE SET status = 'pending', updated_at = excluded.updated_at
+      ON CONFLICT(key) DO UPDATE SET status = 'pending', tier = NULL, file_path = NULL, updated_at = excluded.updated_at
     `).run(keyId(key), Date.now());
   }
 

@@ -37,4 +37,16 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...baseEnv, STREAM_ADDON_URL: 'not-a-url' } as NodeJS.ProcessEnv))
       .toThrow(/not a valid URL/);
   });
+
+  it('throws when a numeric var is present but blank', () => {
+    expect(() => loadConfig({ ...baseEnv, PORT: '' } as NodeJS.ProcessEnv)).toThrow(/PORT/);
+  });
+
+  it('throws when a numeric var is present but not a number', () => {
+    expect(() => loadConfig({ ...baseEnv, EXTRACTION_CONCURRENCY: 'abc' } as NodeJS.ProcessEnv)).toThrow(/EXTRACTION_CONCURRENCY/);
+  });
+
+  it('throws when SUBTITLE_LANGUAGES is present but blank', () => {
+    expect(() => loadConfig({ ...baseEnv, SUBTITLE_LANGUAGES: '' } as NodeJS.ProcessEnv)).toThrow(/SUBTITLE_LANGUAGES/);
+  });
 });

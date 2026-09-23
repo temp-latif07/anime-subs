@@ -29,17 +29,32 @@ function requireUrl(env: NodeJS.ProcessEnv, name: string): string {
   return value;
 }
 
+function requireInt(env: NodeJS.ProcessEnv, name: string, defaultValue: number): number {
+  const raw = env[name];
+  if (raw === undefined) return defaultValue;
+  const parsed = parseInt(raw, 10);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${name} is not a valid integer: ${raw}`);
+  }
+  return parsed;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const subtitleLanguages = (env.SUBTITLE_LANGUAGES ?? 'eng').split(',').map((s) => s.trim()).filter(Boolean);
+  if (subtitleLanguages.length === 0) {
+    throw new Error('SUBTITLE_LANGUAGES resolved to an empty list -- set at least one language or unset the variable to use the default (eng)');
+  }
+
   return {
-    port: parseInt(env.PORT ?? '7000', 10),
+    port: requireInt(env, 'PORT', 7000),
     dataDir: env.DATA_DIR ?? '/data',
     streamAddonUrl: requireUrl(env, 'STREAM_ADDON_URL'),
     jimakuApiKey: requireEnv(env, 'JIMAKU_API_KEY'),
-    subtitleLanguages: (env.SUBTITLE_LANGUAGES ?? 'eng').split(',').map((s) => s.trim()).filter(Boolean),
-    negativeCacheTtlHours: parseInt(env.NEGATIVE_CACHE_TTL_HOURS ?? '24', 10),
-    extractionConcurrency: parseInt(env.EXTRACTION_CONCURRENCY ?? '1', 10),
-    extractionTimeoutMs: parseInt(env.EXTRACTION_TIMEOUT_MS ?? '900000', 10),
-    providerTimeoutMs: parseInt(env.PROVIDER_TIMEOUT_MS ?? '8000', 10),
+    subtitleLanguages,
+    negativeCacheTtlHours: requireInt(env, 'NEGATIVE_CACHE_TTL_HOURS', 24),
+    extractionConcurrency: requireInt(env, 'EXTRACTION_CONCURRENCY', 1),
+    extractionTimeoutMs: requireInt(env, 'EXTRACTION_TIMEOUT_MS', 900000),
+    providerTimeoutMs: requireInt(env, 'PROVIDER_TIMEOUT_MS', 8000),
     logLevel: env.LOG_LEVEL ?? 'info',
   };
 }

@@ -16,6 +16,10 @@ describe('httpClient', () => {
         res.end(Buffer.from([1, 2, 3]));
       } else if (req.url === '/slow') {
         setTimeout(() => res.end('too late'), 500);
+      } else if (req.url === '/slow-body') {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.write(Buffer.from([1, 2]));
+        setTimeout(() => res.end(Buffer.from([3, 4])), 500);
       } else if (req.url === '/error') {
         res.writeHead(500);
         res.end('boom');
@@ -54,5 +58,9 @@ describe('httpClient', () => {
 
   it('throws HttpTimeoutError when the request exceeds timeoutMs', async () => {
     await expect(fetchJson(`${baseUrl}/slow`, { timeoutMs: 50 })).rejects.toThrow(HttpTimeoutError);
+  });
+
+  it('throws HttpTimeoutError when the response body stalls beyond timeoutMs', async () => {
+    await expect(fetchBuffer(`${baseUrl}/slow-body`, { timeoutMs: 50 })).rejects.toThrow(HttpTimeoutError);
   });
 });

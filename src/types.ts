@@ -22,3 +22,8 @@ export interface SubtitleCandidate {
   lang: string;
   url: string;
 }
+
+export interface ResolvedIds {
+  anilistId: number | null;
+  anidbId: number | null;
+}

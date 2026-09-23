@@ -36,6 +36,9 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       } else if (req.url === '/stream/series/kitsu:1:1:2.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ streams: [] }));
+      } else if (req.url === '/stream/series/kitsu:1:1:3.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ streams: [{ url: 'http://127.0.0.1:1/dead.mkv' }, { url: `${baseUrl}/video.mkv` }] }));
       } else if (req.url === '/video.mkv') {
         res.writeHead(200, { 'Content-Type': 'video/x-matroska', 'Accept-Ranges': 'bytes' });
         res.end(mkvBytes);
@@ -95,5 +98,20 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       providerTimeoutMs: 8000,
     });
     expect(result.found).toBe(false);
+  });
+
+  it('falls through a dead candidate stream to a working stream', async () => {
+    const result = await runExtractionTier({
+      streamAddonUrl: `${baseUrl}/manifest.json`,
+      contentId: 'kitsu:1',
+      season: 1,
+      episode: 3,
+      lang: 'eng',
+      queue: new ExtractionQueue(1),
+      extractionTimeoutMs: 30000,
+      providerTimeoutMs: 8000,
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('Remote extraction fixture');
   });
 });

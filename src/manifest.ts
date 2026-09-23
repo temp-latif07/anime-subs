@@ -4,7 +4,7 @@ export const manifest = {
   name: 'AnimeSubs',
   description: 'Tiered anime subtitle resolver: Jimaku and AnimeTosho first, embedded-track extraction from your own stream addon as a fallback when nothing else has anything.',
   resources: ['subtitles'],
-  types: ['series'],
+  types: ['series', 'anime'],
   idPrefixes: ['kitsu', 'mal', 'anidb', 'anilist'],
   catalogs: [],
   behaviorHints: { configurable: false },

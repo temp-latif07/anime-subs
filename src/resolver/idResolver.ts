@@ -9,14 +9,39 @@ export interface ParsedSubtitleRequestId {
 
 export function parseSubtitleRequestId(raw: string): ParsedSubtitleRequestId {
   const parts = raw.split(':');
-  if (parts.length < 3) throw new Error(`Malformed subtitle request id: ${raw}`);
-  const episode = parseInt(parts.pop()!, 10);
-  const season = parseInt(parts.pop()!, 10);
-  const contentId = parts.join(':');
-  if (Number.isNaN(episode) || Number.isNaN(season) || contentId === '') {
-    throw new Error(`Malformed subtitle request id: ${raw}`);
+  if (parts.length < 2) throw new Error(`Malformed subtitle request id: ${raw}`);
+
+  if (parts.length === 3) {
+    if (parts[0].startsWith('tt')) {
+      const episode = parseInt(parts[2], 10);
+      const season = parseInt(parts[1], 10);
+      const contentId = parts[0];
+      if (Number.isNaN(episode) || Number.isNaN(season)) {
+        throw new Error(`Malformed subtitle request id: ${raw}`);
+      }
+      return { contentId, season, episode };
+    } else {
+      const contentId = `${parts[0]}:${parts[1]}`;
+      const season = 1;
+      const episode = parseInt(parts[2], 10);
+      if (Number.isNaN(episode)) {
+        throw new Error(`Malformed subtitle request id: ${raw}`);
+      }
+      return { contentId, season, episode };
+    }
   }
-  return { contentId, season, episode };
+
+  if (parts.length >= 4) {
+    const episode = parseInt(parts.pop()!, 10);
+    const season = parseInt(parts.pop()!, 10);
+    const contentId = parts.join(':');
+    if (Number.isNaN(episode) || Number.isNaN(season) || contentId === '') {
+      throw new Error(`Malformed subtitle request id: ${raw}`);
+    }
+    return { contentId, season, episode };
+  }
+
+  throw new Error(`Malformed subtitle request id: ${raw}`);
 }
 
 export function resolveIds(contentId: string, dataset: AnimeDataset): ResolvedIds {

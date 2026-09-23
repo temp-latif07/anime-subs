@@ -22,9 +22,11 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
 
   app.set('trust proxy', true);
 
-  app.get('/subtitles/series/:id.json', async (req, res) => {
+  app.get(['/subtitles/:type/:id.json', '/subtitles/:type/:id/:extra.json'], async (req, res) => {
     try {
-      const result = await handleSubtitlesRequest(req.params.id, handlerDeps);
+      const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+      const rawId = decodeURIComponent(idParam);
+      const result = await handleSubtitlesRequest(rawId, handlerDeps);
       const host = req.get('host');
       const protocol = req.protocol;
       const origin = host ? `${protocol}://${host}` : '';
@@ -37,7 +39,8 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
       }));
       res.json({ subtitles });
     } catch (err) {
-      res.status(500).json({ subtitles: [], error: (err as Error).message });
+      console.warn(`[HTTP] Error handling subtitles request: ${(err as Error).message}`);
+      res.status(200).json({ subtitles: [] });
     }
   });
 

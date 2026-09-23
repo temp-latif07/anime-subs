@@ -56,7 +56,7 @@ describe('HTTP contract', () => {
     const res = await fetch(`${baseUrl}/manifest.json`);
     expect(res.status).toBe(200);
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    expect(await res.json()).toMatchObject({ id: 'org.animesubs', resources: ['subtitles'], types: ['series'] });
+    expect(await res.json()).toMatchObject({ id: 'org.animesubs', resources: ['subtitles'], types: ['series', 'anime'] });
   });
 
   it('returns an empty subtitles array for an unresolvable id', async () => {
@@ -76,6 +76,20 @@ describe('HTTP contract', () => {
       lang: 'eng',
       url: `${baseUrl}/vtt/154587/1/eng.vtt`,
     });
+  });
+
+  it('handles subtitle requests with extra parameters and url-encoded ids', async () => {
+    const res = await fetch(`${baseUrl}/subtitles/series/kitsu%3A46474%3A1%3A1/filename=Test%20Episode%201.mkv&videoSize=12345.json`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string }> };
+    expect(body.subtitles).toHaveLength(1);
+  });
+
+  it('handles subtitle requests under /subtitles/anime/ type', async () => {
+    const res = await fetch(`${baseUrl}/subtitles/anime/kitsu:46474:1:1.json`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string }> };
+    expect(body.subtitles).toHaveLength(1);
   });
 
   it('serves a cached ready vtt file with the right content type', async () => {

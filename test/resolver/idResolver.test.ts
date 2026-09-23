@@ -19,6 +19,10 @@ describe('parseSubtitleRequestId', () => {
     expect(parseSubtitleRequestId('kitsu:46474:1:10')).toEqual({ contentId: 'kitsu:46474', season: 1, episode: 10 });
   });
 
+  it('splits a 3-part kitsu id into contentId/season=1/episode', () => {
+    expect(parseSubtitleRequestId('kitsu:50350:3')).toEqual({ contentId: 'kitsu:50350', season: 1, episode: 3 });
+  });
+
   it('splits a bare imdb id (no scheme prefix) correctly', () => {
     expect(parseSubtitleRequestId('tt39304754:1:1')).toEqual({ contentId: 'tt39304754', season: 1, episode: 1 });
   });

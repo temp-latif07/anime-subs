@@ -11,6 +11,12 @@ interface StreamResponse {
   streams?: StremioStream[];
 }
 
+const streamUrlCache = new Map<string, { urls: string[]; expiresAt: number }>();
+
+export function clearStreamUrlCache(): void {
+  streamUrlCache.clear();
+}
+
 export async function getPlayableStreamUrls(
   streamAddonManifestUrl: string,
   contentId: string,
@@ -21,6 +27,12 @@ export async function getPlayableStreamUrls(
   const base = streamAddonManifestUrl.replace(/\/manifest\.json\/?$/, '').replace(/\/+$/, '');
   const timeoutMs = opts.timeoutMs ?? 8000;
   const maxCandidates = opts.maxCandidates ?? 5;
+  const cacheKey = `${base}:${contentId}:${season}:${episode}`;
+
+  const cached = streamUrlCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.urls.slice(0, maxCandidates);
+  }
   const requestIds = contentId.startsWith('tt')
     ? [`${contentId}:${season}:${episode}`]
     : [`${contentId}:${episode}`, `${contentId}:${season}:${episode}`];
@@ -34,7 +46,11 @@ export async function getPlayableStreamUrls(
         const playable = streams
           .filter((s): s is StremioStream & { url: string } => typeof s.url === 'string' && s.url.length > 0)
           .map((s) => s.url);
-        if (playable.length > 0) return playable.slice(0, maxCandidates);
+        if (playable.length > 0) {
+          const candidates = playable.slice(0, 10);
+          streamUrlCache.set(cacheKey, { urls: candidates, expiresAt: Date.now() + 5 * 60 * 1000 });
+          return candidates.slice(0, maxCandidates);
+        }
       } catch (err) {
         if (err instanceof HttpTimeoutError) throw err;
         // try next endpoint variant

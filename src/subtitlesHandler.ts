@@ -73,28 +73,35 @@ async function resolveOneLanguage(
 
 async function tryFastTiers(key: CacheKey, anidbId: number | null, deps: SubtitlesHandlerDeps): Promise<boolean> {
   const timeoutOpts = { timeoutMs: deps.config.providerTimeoutMs };
-  try {
-    const jimaku = await deps.jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts);
-    if (jimaku.found && jimaku.vttContent) {
-      console.log(`[Tier 1: Jimaku] HIT for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
-      deps.cache.setReady(key, 1, jimaku.vttContent);
-      return true;
-    }
-  } catch (err) {
-    console.warn(`[Tier 1: Jimaku] Warning: ${(err as Error).message}`);
+
+  const jimakuPromise = deps
+    .jimakuProvider(key.anilistId, key.episode, key.lang, deps.config.jimakuApiKey, timeoutOpts)
+    .catch((err) => {
+      console.warn(`[Tier 1: Jimaku] Warning: ${(err as Error).message}`);
+      return { found: false } as ProviderResult;
+    });
+
+  const toshoPromise = anidbId !== null
+    ? deps
+        .animetoshoProvider(anidbId, key.episode, key.lang, timeoutOpts)
+        .catch((err) => {
+          console.warn(`[Tier 2: AnimeTosho] Warning: ${(err as Error).message}`);
+          return { found: false } as ProviderResult;
+        })
+    : Promise.resolve({ found: false } as ProviderResult);
+
+  const [jimaku, tosho] = await Promise.all([jimakuPromise, toshoPromise]);
+
+  if (jimaku.found && jimaku.vttContent) {
+    console.log(`[Tier 1: Jimaku] HIT for anilist:${key.anilistId} ep:${key.episode} (${key.lang})`);
+    deps.cache.setReady(key, 1, jimaku.vttContent);
+    return true;
   }
 
-  if (anidbId !== null) {
-    try {
-      const tosho = await deps.animetoshoProvider(anidbId, key.episode, key.lang, timeoutOpts);
-      if (tosho.found && tosho.vttContent) {
-        console.log(`[Tier 2: AnimeTosho] HIT for anidb:${anidbId} ep:${key.episode} (${key.lang})`);
-        deps.cache.setReady(key, 2, tosho.vttContent);
-        return true;
-      }
-    } catch (err) {
-      console.warn(`[Tier 2: AnimeTosho] Warning: ${(err as Error).message}`);
-    }
+  if (tosho.found && tosho.vttContent) {
+    console.log(`[Tier 2: AnimeTosho] HIT for anidb:${anidbId} ep:${key.episode} (${key.lang})`);
+    deps.cache.setReady(key, 2, tosho.vttContent);
+    return true;
   }
 
   return false;

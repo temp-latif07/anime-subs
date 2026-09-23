@@ -46,10 +46,24 @@ export async function findSubtitleStreamIndex(
 ): Promise<number | null> {
   const output = await runCommand(
     'ffprobe',
-    ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-select_streams', 's', sourceUrl],
+    [
+      '-v', 'quiet',
+      '-probesize', '1M',
+      '-analyzeduration', '1M',
+      '-print_format', 'json',
+      '-show_streams',
+      '-select_streams', 's',
+      sourceUrl,
+    ],
     timeoutMs,
   );
   const parsed = JSON.parse(output) as FfprobeOutput;
-  const match = (parsed.streams ?? []).find((s) => s.tags?.language === lang);
-  return match ? match.index : null;
+  const streams = parsed.streams ?? [];
+  const matching = streams.filter((s) => s.tags?.language === lang);
+  if (matching.length === 0) return null;
+  const dialogue = matching.find((s) => {
+    const title = ((s.tags as any)?.title ?? '').toLowerCase();
+    return !title.includes('sign') && !title.includes('song');
+  });
+  return (dialogue ?? matching[0]).index;
 }

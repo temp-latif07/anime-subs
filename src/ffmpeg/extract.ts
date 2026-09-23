@@ -37,9 +37,27 @@ export async function extractSubtitleToVtt(
 ): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'animesubs-extract-'));
   const outPath = join(dir, 'out.vtt');
+  const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
+  const httpArgs = isHttp
+    ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']
+    : [];
+
   try {
     await runFfmpeg(
-      ['-v', 'error', '-i', sourceUrl, '-map', `0:${streamIndex}`, '-c:s', 'webvtt', outPath],
+      [
+        '-v', 'error',
+        '-probesize', '1M',
+        '-analyzeduration', '1M',
+        ...httpArgs,
+        '-i', sourceUrl,
+        '-map', `0:${streamIndex}`,
+        '-vn',
+        '-an',
+        '-dn',
+        '-c:s', 'webvtt',
+        '-y',
+        outPath,
+      ],
       timeoutMs,
     );
     return normalizeVtt(readFileSync(outPath, 'utf-8'));

@@ -65,7 +65,7 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
       try {
         await Promise.race([
           inFlight,
-          new Promise((resolve) => setTimeout(resolve, 15000)),
+          new Promise((resolve) => setTimeout(resolve, 35000)),
         ]);
       } catch {
         // extraction finished or failed; re-check cache below

@@ -1,10 +1,25 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { parseSubtitleStreams, findSubtitleStream } from '../../src/ffmpeg/probe.js';
+import {
+  parseSubtitleStreams,
+  findSubtitleStream,
+  findSubtitleStreamFromBuffer,
+  findSubtitleStreamFromBufferDetailed,
+} from '../../src/ffmpeg/probe.js';
+import { fetchBufferCapped } from '../../src/http/httpClient.js';
+
+vi.mock('../../src/http/httpClient.js', () => ({
+  fetchBufferCapped: vi.fn(),
+}));
 
 let mockSpawnChild: any = null;
 vi.mock('node:child_process', () => ({
-  spawn: vi.fn(() => mockSpawnChild),
+  spawn: vi.fn((...args: any[]) => {
+    if (typeof mockSpawnChild === 'function') {
+      return mockSpawnChild(...args);
+    }
+    return mockSpawnChild;
+  }),
 }));
 
 describe('parseSubtitleStreams', () => {
@@ -172,4 +187,189 @@ describe('findSubtitleStream fallback timeout', () => {
     }
   });
 });
+
+function createMockProcess(stdoutText = '', exitCode = 0) {
+  const child = new EventEmitter() as any;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = {
+    write: vi.fn(),
+    end: vi.fn(),
+    on: vi.fn(),
+  };
+  child.kill = vi.fn();
+  queueMicrotask(() => {
+    if (stdoutText) {
+      child.stdout.emit('data', stdoutText);
+    }
+    child.emit('close', exitCode);
+  });
+  return child;
+}
+
+describe('findSubtitleStreamFromBufferDetailed', () => {
+  it('returns hasStreams: true and stream: null when streams exist but none match requested language', async () => {
+    mockSpawnChild = () =>
+      createMockProcess(
+        JSON.stringify({
+          streams: [{ index: 0, codec_name: 'subrip', tags: { language: 'fre', title: 'French' } }],
+        }),
+      );
+
+    const result = await findSubtitleStreamFromBufferDetailed(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toEqual({ stream: null, hasStreams: true });
+    mockSpawnChild = null;
+  });
+
+  it('returns hasStreams: true and matching stream when language matches', async () => {
+    mockSpawnChild = () =>
+      createMockProcess(
+        JSON.stringify({
+          streams: [{ index: 2, codec_name: 'ass', tags: { language: 'eng', title: 'Dialogue' } }],
+        }),
+      );
+
+    const result = await findSubtitleStreamFromBufferDetailed(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toEqual({ stream: { index: 2, codec: 'ass' }, hasStreams: true });
+    mockSpawnChild = null;
+  });
+
+  it('returns hasStreams: false and stream: null when buffer probe yields 0 streams', async () => {
+    mockSpawnChild = () => createMockProcess(JSON.stringify({ streams: [] }));
+
+    const result = await findSubtitleStreamFromBufferDetailed(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toEqual({ stream: null, hasStreams: false });
+    mockSpawnChild = null;
+  });
+
+  it('returns hasStreams: false and stream: null when ffprobe fails on pipe:0', async () => {
+    mockSpawnChild = () => createMockProcess('', 1);
+
+    const result = await findSubtitleStreamFromBufferDetailed(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toEqual({ stream: null, hasStreams: false });
+    mockSpawnChild = null;
+  });
+});
+
+describe('findSubtitleStreamFromBuffer (backward compatibility)', () => {
+  it('returns FoundSubtitleStream when matching language is present', async () => {
+    mockSpawnChild = () =>
+      createMockProcess(
+        JSON.stringify({
+          streams: [{ index: 1, codec_name: 'ass', tags: { language: 'eng', title: 'Dialogue' } }],
+        }),
+      );
+
+    const result = await findSubtitleStreamFromBuffer(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toEqual({ index: 1, codec: 'ass' });
+    mockSpawnChild = null;
+  });
+
+  it('returns null when streams exist but none match requested language', async () => {
+    mockSpawnChild = () =>
+      createMockProcess(
+        JSON.stringify({
+          streams: [{ index: 1, codec_name: 'ass', tags: { language: 'jpn', title: 'Japanese' } }],
+        }),
+      );
+
+    const result = await findSubtitleStreamFromBuffer(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toBeNull();
+    mockSpawnChild = null;
+  });
+
+  it('returns null when buffer probe fails', async () => {
+    mockSpawnChild = () => createMockProcess('', 1);
+
+    const result = await findSubtitleStreamFromBuffer(Buffer.from('dummy-mkv'), 'eng');
+    expect(result).toBeNull();
+    mockSpawnChild = null;
+  });
+});
+
+describe('findSubtitleStream buffer fast-rejection', () => {
+  it('does not fall through to remote ffprobe when buffer has valid stream headers for other languages', async () => {
+    vi.mocked(fetchBufferCapped).mockResolvedValue(Buffer.from('mkv-2mb-buffer'));
+
+    const spawnCalls: { command: string; args: string[] }[] = [];
+    mockSpawnChild = (command: string, args: string[]) => {
+      spawnCalls.push({ command, args });
+      if (args.includes('pipe:0')) {
+        return createMockProcess(
+          JSON.stringify({
+            streams: [
+              { index: 0, codec_name: 'subrip', tags: { language: 'fre', title: 'French' } },
+              { index: 1, codec_name: 'ass', tags: { language: 'jpn', title: 'Japanese' } },
+            ],
+          }),
+        );
+      }
+      return createMockProcess('', 0);
+    };
+
+    const result = await findSubtitleStream('http://example.com/video.mkv', 'eng');
+
+    expect(result).toBeNull();
+    // Only pipe:0 should be probed, remote ffprobe URL should NOT have been invoked
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].args).toContain('pipe:0');
+    expect(spawnCalls.some((c) => c.args.includes('http://example.com/video.mkv'))).toBe(false);
+
+    mockSpawnChild = null;
+  });
+
+  it('returns buffer stream directly without calling remote ffprobe when match found', async () => {
+    vi.mocked(fetchBufferCapped).mockResolvedValue(Buffer.from('mkv-2mb-buffer'));
+
+    const spawnCalls: { command: string; args: string[] }[] = [];
+    mockSpawnChild = (command: string, args: string[]) => {
+      spawnCalls.push({ command, args });
+      if (args.includes('pipe:0')) {
+        return createMockProcess(
+          JSON.stringify({
+            streams: [{ index: 1, codec_name: 'ass', tags: { language: 'eng', title: 'Dialogue' } }],
+          }),
+        );
+      }
+      return createMockProcess('', 0);
+    };
+
+    const result = await findSubtitleStream('http://example.com/video.mkv', 'eng');
+
+    expect(result).toEqual({ index: 1, codec: 'ass' });
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0].args).toContain('pipe:0');
+
+    mockSpawnChild = null;
+  });
+
+  it('falls through to remote ffprobe when buffer probe yields hasStreams: false (e.g. truncated buffer)', async () => {
+    vi.mocked(fetchBufferCapped).mockResolvedValue(Buffer.from('mkv-corrupt-buffer'));
+
+    const spawnCalls: { command: string; args: string[] }[] = [];
+    mockSpawnChild = (command: string, args: string[]) => {
+      spawnCalls.push({ command, args });
+      if (args.includes('pipe:0')) {
+        // Buffer probe fails / cannot parse streams
+        return createMockProcess('', 1);
+      }
+      // Remote URL probe succeeds
+      return createMockProcess(
+        JSON.stringify({
+          streams: [{ index: 3, codec_name: 'subrip', tags: { language: 'eng', title: 'English' } }],
+        }),
+      );
+    };
+
+    const result = await findSubtitleStream('http://example.com/video.mkv', 'eng');
+
+    expect(result).toEqual({ index: 3, codec: 'subrip' });
+    expect(spawnCalls).toHaveLength(2);
+    expect(spawnCalls[0].args).toContain('pipe:0');
+    expect(spawnCalls[1].args).toContain('http://example.com/video.mkv');
+
+    mockSpawnChild = null;
+  });
+});
+
 

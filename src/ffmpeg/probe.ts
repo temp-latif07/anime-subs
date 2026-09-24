@@ -6,6 +6,11 @@ export interface FoundSubtitleStream {
   codec: string;
 }
 
+export interface BufferProbeResult {
+  stream: FoundSubtitleStream | null;
+  hasStreams: boolean;
+}
+
 interface FfprobeStream {
   index: number;
   codec_name?: string;
@@ -112,11 +117,11 @@ export function parseSubtitleStreams(output: string, lang: string): FoundSubtitl
   }
 }
 
-export async function findSubtitleStreamFromBuffer(
+export async function findSubtitleStreamFromBufferDetailed(
   buffer: Buffer,
   lang: string,
   timeoutMs = 10000,
-): Promise<FoundSubtitleStream | null> {
+): Promise<BufferProbeResult> {
   try {
     const output = await runCommandWithInput(
       'ffprobe',
@@ -130,10 +135,25 @@ export async function findSubtitleStreamFromBuffer(
       buffer,
       timeoutMs,
     );
-    return parseSubtitleStreams(output, lang);
+    const parsed = JSON.parse(output) as FfprobeOutput;
+    const streams = parsed.streams ?? [];
+    if (streams.length > 0) {
+      const stream = parseSubtitleStreams(output, lang);
+      return { stream, hasStreams: true };
+    }
+    return { stream: null, hasStreams: false };
   } catch {
-    return null;
+    return { stream: null, hasStreams: false };
   }
+}
+
+export async function findSubtitleStreamFromBuffer(
+  buffer: Buffer,
+  lang: string,
+  timeoutMs = 10000,
+): Promise<FoundSubtitleStream | null> {
+  const result = await findSubtitleStreamFromBufferDetailed(buffer, lang, timeoutMs);
+  return result.stream;
 }
 
 export async function findSubtitleStream(
@@ -151,11 +171,15 @@ export async function findSubtitleStream(
         timeoutMs: Math.min(timeoutMs, 5000),
       });
       if (rangeBuffer.length > 0) {
-        const fromBuffer = await findSubtitleStreamFromBuffer(rangeBuffer, lang, 5000);
-        if (fromBuffer !== null) return fromBuffer;
+        const bufferResult = await findSubtitleStreamFromBufferDetailed(rangeBuffer, lang, 5000);
+        if (bufferResult.stream !== null) return bufferResult.stream;
+        if (bufferResult.hasStreams) {
+          // Fast-reject without wasting 15s on remote ffprobe!
+          return null;
+        }
       }
     } catch {
-      // Fall through to remote URL ffprobe
+      // Fall through to remote URL ffprobe on network/Range error
     }
   }
 

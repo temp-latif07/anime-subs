@@ -170,4 +170,41 @@ Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,I am doing well.
     const cues = vtt.trim().split('\n\n').slice(1);
     expect(cues.length).toBe(2);
   });
+
+  it('does not treat fullwidth Latin punctuation as Japanese', () => {
+    const ass = `[Script Info]
+Title: Test
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Wait！ What was that？
+`;
+    const vtt = convertAssToVtt(ass, 'eng');
+    expect(vtt).toContain('Wait！ What was that？');
+  });
+
+  it('strips song styles named without a separator, like OP1, Opening, ED2', () => {
+    const ass = `[Script Info]
+Title: Test
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
+Style: OP1,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
+Style: Opening,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,OP1,,0,0,0,,Romanized lyric line one
+Dialogue: 0,0:00:04.00,0:00:06.00,Opening,,0,0,0,,Romanized lyric line two
+Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,Hello, how are you?
+`;
+    const vtt = convertAssToVtt(ass, 'eng');
+    expect(vtt).toContain('Hello, how are you?');
+    expect(vtt).not.toContain('Romanized lyric line one');
+    expect(vtt).not.toContain('Romanized lyric line two');
+  });
 });
+

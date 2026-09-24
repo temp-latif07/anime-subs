@@ -40,8 +40,8 @@ interface AssCue {
   text: string;
 }
 
-export const JAPANESE_CHAR_REGEX = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF\u3000-\u303F\uFF00-\uFFEF]/;
-const SONG_STYLE_REGEX = /^(op|ed|song|karaoke|lyrics|insert|music)\b|kanji|romaji/i;
+export const JAPANESE_CHAR_REGEX = /[぀-ゟ゠-ヿ一-鿿㐀-䶿]/;
+const SONG_STYLE_REGEX = /^(opening|op|ending|ed|song|karaoke|lyrics|insert|music)(\b|\d)|kanji|romaji/i;
 const KARAOKE_TAG_REGEX = /\{[^}]*\\k[f|o]?[0-9]+[^}]*\}/i;
 
 export function convertAssToVtt(ass: string, targetLang?: string): string {

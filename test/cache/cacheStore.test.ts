@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -68,6 +68,44 @@ describe('CacheStore', () => {
     expect(store.get(key)).not.toBeNull();
     store.delete(key);
     expect(store.get(key)).toBeNull();
+  });
+
+  it('deleteByKey removes the database entry and unlinks the file from disk', () => {
+    const toshoKey = { ...key, provider: 'animetosho' as const };
+    const filePath = store.setReady(toshoKey, 'WEBVTT\n\n1\nhello');
+    expect(existsSync(filePath)).toBe(true);
+
+    const deleted = store.deleteByKey(`${toshoKey.anilistId}:${toshoKey.episode}:${toshoKey.lang}:${toshoKey.provider}`);
+    expect(deleted).toBe(true);
+    expect(store.get(toshoKey)).toBeNull();
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('delete removes the database entry and unlinks the file from disk', () => {
+    const toshoKey = { ...key, provider: 'animetosho' as const };
+    const filePath = store.setReady(toshoKey, 'WEBVTT\n\n1\nhello');
+    expect(existsSync(filePath)).toBe(true);
+
+    store.delete(toshoKey);
+    expect(store.get(toshoKey)).toBeNull();
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  it('purges known forced cache entries (e.g. 195600:2:eng:animetosho) on initialization', () => {
+    const forcedKey = { anilistId: 195600, episode: 2, lang: 'eng', provider: 'animetosho' as const };
+    const filePath = store.setReady(forcedKey, 'WEBVTT\n\n1\nForced subtitle line');
+    expect(store.get(forcedKey)).not.toBeNull();
+    expect(existsSync(filePath)).toBe(true);
+
+    // Re-initialize a new CacheStore on the same directory
+    const dbPath = join(dir, 'cache.db');
+    const newStore = new CacheStore(dbPath, join(dir, 'files'));
+    try {
+      expect(newStore.get(forcedKey)).toBeNull();
+      expect(existsSync(filePath)).toBe(false);
+    } finally {
+      newStore.close();
+    }
   });
 
   it('tracks and clears in-flight work per key', () => {

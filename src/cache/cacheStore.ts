@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeVtt } from '../ffmpeg/vttUtils.js';
 import type { CacheKey, CacheEntry, CacheStatus, CacheProvider, ProviderResult } from '../types.js';
@@ -43,6 +43,7 @@ export class CacheStore {
       this.db.exec("ALTER TABLE cache ADD COLUMN provider TEXT");
     }
     this.migrateTierColumnIfPresent(columns);
+    this.purgeKnownForcedEntries();
   }
 
   private migrateTierColumnIfPresent(columns?: { name: string }[]): void {
@@ -115,8 +116,34 @@ export class CacheStore {
     `).run(keyId(key), Date.now());
   }
 
+  deleteByKey(rawKey: string): boolean {
+    const row = this.db
+      .prepare('SELECT file_path FROM cache WHERE key = ?')
+      .get(rawKey) as { file_path: string | null } | undefined;
+    if (row?.file_path && existsSync(row.file_path)) {
+      try {
+        unlinkSync(row.file_path);
+      } catch {
+        // file unlink error ignored
+      }
+    }
+    const result = this.db.prepare('DELETE FROM cache WHERE key = ?').run(rawKey);
+    return result.changes > 0;
+  }
+
   delete(key: CacheKey): void {
-    this.db.prepare('DELETE FROM cache WHERE key = ?').run(keyId(key));
+    this.deleteByKey(keyId(key));
+  }
+
+  purgeKnownForcedEntries(): number {
+    const KNOWN_FORCED_KEYS = ['195600:2:eng:animetosho'];
+    let count = 0;
+    for (const rawKey of KNOWN_FORCED_KEYS) {
+      if (this.deleteByKey(rawKey)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   isNegativeExpired(entry: CacheEntry, ttlHours: number): boolean {

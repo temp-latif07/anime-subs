@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { EpisodeMapping } from './episodeMapping.js';
 
 export interface RawDatasetEntry {
   title?: string;
@@ -9,10 +10,11 @@ export interface RawDataset {
   data: RawDatasetEntry[];
 }
 
-interface IdRow {
+export interface IdRow {
   anilistId: number | null;
   anidbId: number | null;
   title: string | null;
+  imdbId: string | null;
 }
 
 const SOURCE_PATTERNS = {
@@ -48,7 +50,7 @@ export class AnimeDataset {
     return new AnimeDataset(db);
   }
 
-  static buildFromRaw(raw: RawDataset, db: Database.Database): AnimeDataset {
+  static buildFromRaw(raw: RawDataset, db: Database.Database, episodeMapping?: EpisodeMapping): AnimeDataset {
     const rebuild = db.transaction((entries: RawDatasetEntry[]) => {
       db.exec(`
         DROP TABLE IF EXISTS anime_ids;
@@ -57,18 +59,21 @@ export class AnimeDataset {
           anidb_id INTEGER,
           kitsu_id INTEGER,
           mal_id INTEGER,
-          title TEXT
+          title TEXT,
+          imdb_id TEXT
         );
         CREATE INDEX idx_anilist ON anime_ids(anilist_id);
         CREATE INDEX idx_anidb ON anime_ids(anidb_id);
         CREATE INDEX idx_kitsu ON anime_ids(kitsu_id);
         CREATE INDEX idx_mal ON anime_ids(mal_id);
+        CREATE INDEX idx_imdb ON anime_ids(imdb_id);
       `);
-      const insert = db.prepare('INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id, title) VALUES (?, ?, ?, ?, ?)');
+      const insert = db.prepare('INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id, title, imdb_id) VALUES (?, ?, ?, ?, ?, ?)');
       for (const entry of entries) {
         const ids = extractIds(entry.sources);
         if (ids.anilistId === null && ids.anidbId === null && ids.kitsuId === null && ids.malId === null) continue;
-        insert.run(ids.anilistId, ids.anidbId, ids.kitsuId, ids.malId, entry.title ?? null);
+        const imdbId = ids.anidbId !== null ? (episodeMapping?.findByAnidbId(ids.anidbId)?.imdbId ?? null) : null;
+        insert.run(ids.anilistId, ids.anidbId, ids.kitsuId, ids.malId, entry.title ?? null, imdbId);
       }
     });
 
@@ -77,12 +82,16 @@ export class AnimeDataset {
   }
 
   findByAnilistId(id: number): IdRow | null {
-    return (this.db.prepare('SELECT anilist_id as anilistId, anidb_id as anidbId, title FROM anime_ids WHERE anilist_id = ?').get(id) as IdRow) ?? null;
+    return (this.db.prepare('SELECT anilist_id as anilistId, anidb_id as anidbId, title, imdb_id as imdbId FROM anime_ids WHERE anilist_id = ?').get(id) as IdRow) ?? null;
   }
 
   findByScheme(scheme: 'kitsu' | 'mal' | 'anidb', id: number): IdRow | null {
     const column = scheme === 'kitsu' ? 'kitsu_id' : scheme === 'mal' ? 'mal_id' : 'anidb_id';
-    return (this.db.prepare(`SELECT anilist_id as anilistId, anidb_id as anidbId, title FROM anime_ids WHERE ${column} = ?`).get(id) as IdRow) ?? null;
+    return (this.db.prepare(`SELECT anilist_id as anilistId, anidb_id as anidbId, title, imdb_id as imdbId FROM anime_ids WHERE ${column} = ?`).get(id) as IdRow) ?? null;
+  }
+
+  findByImdbId(imdbId: string): IdRow[] {
+    return this.db.prepare('SELECT anilist_id as anilistId, anidb_id as anidbId, title, imdb_id as imdbId FROM anime_ids WHERE imdb_id = ?').all(imdbId) as IdRow[];
   }
 }
 

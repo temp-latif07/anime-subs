@@ -13,7 +13,7 @@ describe('loadOrRefreshDataset', () => {
 
     // downloadDataset with an unreachable URL forces a failure
     const dataset = await loadOrRefreshDataset(db, undefined, 'http://127.0.0.1:1/unreachable');
-    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('rethrows when the download fails and there is no fallback table at all', async () => {

@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { AnimeDataset, downloadDataset } from '../../src/resolver/animeDataset.js';
+import { EpisodeMapping } from '../../src/resolver/episodeMapping.js';
 
 const sampleRaw = {
   data: [
@@ -21,17 +22,17 @@ const sampleRaw = {
 describe('AnimeDataset', () => {
   it('finds an entry by AniList id and returns its AniDB id', () => {
     const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
-    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('finds an entry by Kitsu id', () => {
     const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
-    expect(dataset.findByScheme('kitsu', 46474)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(dataset.findByScheme('kitsu', 46474)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('finds an entry by MAL id', () => {
     const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
-    expect(dataset.findByScheme('mal', 52991)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(dataset.findByScheme('mal', 52991)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('returns null for an id with no match', () => {
@@ -78,7 +79,36 @@ describe('AnimeDataset', () => {
     const db = new Database(':memory:');
     AnimeDataset.buildFromRaw(sampleRaw, db);
     const dataset = AnimeDataset.fromExistingTable(db);
-    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
+  });
+
+  it('populates imdb_id by joining anidb_id against the episode mapping, when one is provided', () => {
+    const mappingXml = `<?xml version="1.0" encoding="utf-8"?>
+<anime-list>
+  <anime anidbid="17617" tvdbid="movie" imdbid="tt7441658">
+    <name>Fixture</name>
+  </anime>
+</anime-list>`;
+    const episodeMapping = EpisodeMapping.buildFromXml(mappingXml, new Database(':memory:'));
+    const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'), episodeMapping);
+    expect(dataset.findByAnilistId(154587)?.imdbId).toBe('tt7441658');
+  });
+
+  it('leaves imdbId null when no episode mapping is supplied', () => {
+    const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'));
+    expect(dataset.findByAnilistId(154587)?.imdbId).toBeNull();
+  });
+
+  it('findByImdbId returns every anidb entry sharing that imdbId', () => {
+    const mappingXml = `<?xml version="1.0" encoding="utf-8"?>
+<anime-list>
+  <anime anidbid="17617" tvdbid="movie" imdbid="tt7441658"><name>A</name></anime>
+</anime-list>`;
+    const episodeMapping = EpisodeMapping.buildFromXml(mappingXml, new Database(':memory:'));
+    const dataset = AnimeDataset.buildFromRaw(sampleRaw, new Database(':memory:'), episodeMapping);
+    const rows = dataset.findByImdbId('tt7441658');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].anilistId).toBe(154587);
   });
 });
 

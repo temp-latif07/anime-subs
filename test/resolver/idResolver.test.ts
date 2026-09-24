@@ -42,15 +42,15 @@ describe('parseSubtitleRequestId', () => {
 
 describe('resolveIds', () => {
   it('resolves a kitsu id via the dataset', () => {
-    expect(resolveIds('kitsu:46474', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(resolveIds('kitsu:46474', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('resolves a mal id via the dataset', () => {
-    expect(resolveIds('mal:52991', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(resolveIds('mal:52991', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('resolves an anilist id directly', () => {
-    expect(resolveIds('anilist:154587', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+    expect(resolveIds('anilist:154587', dataset)).toEqual({ anilistId: 154587, anidbId: 17617, title: null, imdbId: null });
   });
 
   it('returns nulls for a bare tt id (no IMDb mapping in v1)', () => {

@@ -70,6 +70,10 @@ export class EpisodeMapping {
     this.db = db;
   }
 
+  static fromExistingTable(db: Database.Database): EpisodeMapping {
+    return new EpisodeMapping(db);
+  }
+
   static buildFromXml(xml: string, db: Database.Database): EpisodeMapping {
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
     const parsed = parser.parse(xml) as { 'anime-list'?: { anime?: RawAnimeElement | RawAnimeElement[] } };

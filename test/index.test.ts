@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { AnimeDataset } from '../src/resolver/animeDataset.js';
-import { loadOrRefreshDataset, createShutdownHandler } from '../src/index.js';
+import { EpisodeMapping } from '../src/resolver/episodeMapping.js';
+import { loadOrRefreshDataset, loadOrRefreshEpisodeMapping, createShutdownHandler } from '../src/index.js';
 
 describe('loadOrRefreshDataset', () => {
   it('falls back to an existing on-disk anime_ids table when the download fails and no previous in-memory dataset exists', async () => {
@@ -38,6 +39,20 @@ describe('loadOrRefreshDataset', () => {
   });
 });
 
+describe('loadOrRefreshEpisodeMapping', () => {
+  it('falls back to an existing on-disk episode_mapping table when the download fails and no previous instance exists', async () => {
+    const db = new Database(':memory:');
+    EpisodeMapping.buildFromXml('<?xml version="1.0"?><anime-list><anime anidbid="1" tvdbid="72025" defaulttvdbseason="1"><name>Fixture</name></anime></anime-list>', db);
+    const mapping = await loadOrRefreshEpisodeMapping(db, undefined, 'http://127.0.0.1:1/unreachable');
+    expect(mapping.mapAnidbToTvdbEpisode(1, 5)).toEqual({ season: 1, episode: 5 });
+  });
+
+  it('rethrows when the download fails and there is no fallback table at all', async () => {
+    const db = new Database(':memory:');
+    await expect(loadOrRefreshEpisodeMapping(db, undefined, 'http://127.0.0.1:1/unreachable')).rejects.toThrow();
+  });
+});
+
 describe('createShutdownHandler', () => {
   it('clears interval, closes server, closes databases, and exits 0 on signal', () => {
     let intervalCleared = false;
@@ -51,6 +66,7 @@ describe('createShutdownHandler', () => {
     let serverClosed = false;
     let cacheClosed = false;
     let dbClosed = false;
+    let episodeMappingDbClosed = false;
     let exitCode: number | null = null;
 
     const mockServer = {
@@ -69,12 +85,18 @@ describe('createShutdownHandler', () => {
         dbClosed = true;
       },
     } as any;
+    const mockEpisodeMappingDb = {
+      close: () => {
+        episodeMappingDbClosed = true;
+      },
+    } as any;
 
     try {
       const shutdown = createShutdownHandler({
         server: mockServer,
         cache: mockCache as any,
         datasetDb: mockDb,
+        episodeMappingDb: mockEpisodeMappingDb,
         refreshInterval: interval,
         exit: (code) => {
           exitCode = code;
@@ -87,6 +109,7 @@ describe('createShutdownHandler', () => {
       expect(serverClosed).toBe(true);
       expect(cacheClosed).toBe(true);
       expect(dbClosed).toBe(true);
+      expect(episodeMappingDbClosed).toBe(true);
       expect(exitCode).toBe(0);
     } finally {
       globalThis.clearInterval = origClearInterval;

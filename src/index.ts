@@ -4,11 +4,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
 import { AnimeDataset, downloadDataset } from './resolver/animeDataset.js';
+import { EpisodeMapping, downloadEpisodeMapping } from './resolver/episodeMapping.js';
 import { CacheStore } from './cache/cacheStore.js';
 import { ExtractionQueue } from './queue/extractionQueue.js';
 import { createServer } from './server.js';
 import { findJimakuSubtitle } from './providers/jimakuProvider.js';
 import { findAnimeToshoSubtitle } from './providers/animetoshoProvider.js';
+import { findOpenSubtitlesSubtitle } from './providers/opensubtitlesProvider.js';
 import { runExtractionTier } from './providers/extractionProvider.js';
 import type { DatasetHolder } from './subtitlesHandler.js';
 
@@ -18,10 +20,11 @@ export async function loadOrRefreshDataset(
   datasetDb: Database.Database,
   previous?: AnimeDataset,
   downloadUrl?: string,
+  episodeMapping?: EpisodeMapping,
 ): Promise<AnimeDataset> {
   try {
     const raw = await downloadDataset(downloadUrl);
-    return AnimeDataset.buildFromRaw(raw, datasetDb);
+    return AnimeDataset.buildFromRaw(raw, datasetDb, episodeMapping);
   } catch (err) {
     if (previous) {
       console.error(`[AnimeSubs] Dataset download/build failed, keeping previous in-memory dataset: ${(err as Error).message}`);
@@ -48,10 +51,45 @@ function tryLoadExistingTable(db: Database.Database): AnimeDataset | null {
   }
 }
 
+export async function loadOrRefreshEpisodeMapping(
+  episodeMappingDb: Database.Database,
+  previous?: EpisodeMapping,
+  downloadUrl?: string,
+): Promise<EpisodeMapping> {
+  try {
+    const xml = await downloadEpisodeMapping(downloadUrl);
+    return EpisodeMapping.buildFromXml(xml, episodeMappingDb);
+  } catch (err) {
+    if (previous) {
+      console.error(`[AnimeSubs] Episode-mapping download/build failed, keeping previous in-memory mapping: ${(err as Error).message}`);
+      return previous;
+    }
+    const existing = tryLoadExistingEpisodeMappingTable(episodeMappingDb);
+    if (existing) {
+      console.error(`[AnimeSubs] Episode-mapping download failed on startup; falling back to on-disk table from a previous run: ${(err as Error).message}`);
+      return existing;
+    }
+    throw err;
+  }
+}
+
+function tryLoadExistingEpisodeMappingTable(db: Database.Database): EpisodeMapping | null {
+  try {
+    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='episode_mapping'").get();
+    if (!row) return null;
+    const count = (db.prepare('SELECT COUNT(*) as c FROM episode_mapping').get() as { c: number }).c;
+    if (count === 0) return null;
+    return EpisodeMapping.fromExistingTable(db);
+  } catch {
+    return null;
+  }
+}
+
 export interface ShutdownDependencies {
   server: { close: (callback?: (err?: Error) => void) => void };
   cache?: { close: () => void };
   datasetDb?: Database.Database;
+  episodeMappingDb?: Database.Database;
   refreshInterval?: NodeJS.Timeout;
   exit?: (code: number) => void;
 }
@@ -68,6 +106,7 @@ export function createShutdownHandler(deps: ShutdownDependencies): (signal: stri
     deps.server.close(() => {
       deps.cache?.close();
       deps.datasetDb?.close();
+      deps.episodeMappingDb?.close();
       (deps.exit ?? process.exit)(0);
     });
   };
@@ -77,10 +116,14 @@ async function main() {
   const config = loadConfig();
   mkdirSync(config.dataDir, { recursive: true });
 
+  const episodeMappingDb = new Database(join(config.dataDir, 'episode-mapping.db'));
+  let episodeMapping = await loadOrRefreshEpisodeMapping(episodeMappingDb);
+
   const datasetDb = new Database(join(config.dataDir, 'anime-dataset.db'));
-  const datasetHolder: DatasetHolder = { current: await loadOrRefreshDataset(datasetDb) };
+  const datasetHolder: DatasetHolder = { current: await loadOrRefreshDataset(datasetDb, undefined, undefined, episodeMapping) };
   const refreshInterval = setInterval(async () => {
-    datasetHolder.current = await loadOrRefreshDataset(datasetDb, datasetHolder.current);
+    episodeMapping = await loadOrRefreshEpisodeMapping(episodeMappingDb, episodeMapping);
+    datasetHolder.current = await loadOrRefreshDataset(datasetDb, datasetHolder.current, undefined, episodeMapping);
   }, DATASET_REFRESH_INTERVAL_MS);
 
   const cache = new CacheStore(join(config.dataDir, 'cache.db'), join(config.dataDir, 'subtitles'));
@@ -93,12 +136,14 @@ async function main() {
 
   const app = createServer({
     dataset: datasetHolder,
+    episodeMapping,
     cache,
     queue,
     config,
-    buildSubtitleUrl: (key) => `/vtt/${key.anilistId}/${key.episode}/${key.lang}.vtt`,
+    buildSubtitleUrl: (key) => `/vtt/${key.anilistId}/${key.episode}/${key.lang}/${key.provider}.vtt`,
     jimakuProvider: findJimakuSubtitle,
     animetoshoProvider: findAnimeToshoSubtitle,
+    opensubtitlesProvider: findOpenSubtitlesSubtitle,
     extractionProvider: runExtractionTier,
   }, cache);
 
@@ -110,6 +155,7 @@ async function main() {
     server,
     cache,
     datasetDb,
+    episodeMappingDb,
     refreshInterval,
   });
   process.on('SIGTERM', () => shutdown('SIGTERM'));

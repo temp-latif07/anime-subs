@@ -104,9 +104,11 @@ export async function extractSubtitleToVtt(
 
   const baseArgs = [
     '-v', 'error',
+    '-fflags', '+nobuffer+flush_packets',
     '-probesize', '1M',
-    '-analyzeduration', '500k',
+    '-analyzeduration', '0',
     ...httpArgs,
+    '-ss', '0',
     '-i', sourceUrl,
     '-map', `0:${streamIndex}`,
     '-vn',

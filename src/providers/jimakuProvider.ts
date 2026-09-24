@@ -19,11 +19,8 @@ const LANGUAGE_TOKENS: Record<string, RegExp> = {
 const SUBTITLE_EXTENSIONS = /\.(srt|ass|vtt)$/i;
 const EXCLUDED_LANGUAGE_TOKENS = /\b(japanese|jpn|jp)\b/i;
 
-function matchesLanguage(filename: string, lang: string): boolean {
-  if (!SUBTITLE_EXTENSIONS.test(filename)) return false;
-  if (EXCLUDED_LANGUAGE_TOKENS.test(filename)) return false;
-  const pattern = LANGUAGE_TOKENS[lang];
-  return pattern ? pattern.test(filename) : false;
+function hasAnyLanguageToken(filename: string): boolean {
+  return Object.values(LANGUAGE_TOKENS).some((p) => p.test(filename)) || EXCLUDED_LANGUAGE_TOKENS.test(filename);
 }
 
 function extToVttInput(filename: string): 'ass' | 'srt' | 'vtt' | null {
@@ -59,16 +56,25 @@ export async function findJimakuSubtitle(
     `${baseUrl}/api/entries/${entry.id}/files?episode=${episode}`,
     { headers: { Authorization: apiKey }, timeoutMs },
   );
-  const match = files.find((f) => matchesLanguage(f.name, lang));
-  if (!match) return { found: false };
 
-  const ext = extToVttInput(match.name);
-  if (!ext) return { found: false };
+  const candidates = files.filter((f) => SUBTITLE_EXTENSIONS.test(f.name) && !EXCLUDED_LANGUAGE_TOKENS.test(f.name));
+  const taggedMatches = candidates.filter((f) => LANGUAGE_TOKENS[lang]?.test(f.name));
+  const untaggedFallback =
+    Boolean(LANGUAGE_TOKENS[lang]) &&
+    candidates.length === 1 &&
+    taggedMatches.length === 0 &&
+    !hasAnyLanguageToken(candidates[0].name)
+      ? candidates
+      : [];
+  const ordered = taggedMatches.length > 0 ? taggedMatches : untaggedFallback;
 
-  const raw = await fetchBuffer(match.url, { timeoutMs });
-  const vttContent = ext === 'vtt' ? raw.toString('utf-8') : await convertToVtt(raw, ext, lang);
-  if (!isAcceptableSubtitle(vttContent, lang)) {
-    return { found: false };
+  for (const match of ordered) {
+    const ext = extToVttInput(match.name);
+    if (!ext) continue;
+    const raw = await fetchBuffer(match.url, { timeoutMs });
+    const vttContent = ext === 'vtt' ? raw.toString('utf-8') : await convertToVtt(raw, ext, lang);
+    if (!isAcceptableSubtitle(vttContent, lang)) continue;
+    return { found: true, vttContent };
   }
-  return { found: true, vttContent };
+  return { found: false };
 }

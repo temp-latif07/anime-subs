@@ -86,17 +86,23 @@ export function runCommandWithInput(
   });
 }
 
-function parseSubtitleStreams(output: string, lang: string): FoundSubtitleStream | null {
+const TEXT_SUBTITLE_CODECS = new Set(['ass', 'ssa', 'subrip', 'srt', 'webvtt', 'mov_text']);
+
+export function parseSubtitleStreams(output: string, lang: string): FoundSubtitleStream | null {
   try {
     const parsed = JSON.parse(output) as FfprobeOutput;
     const streams = parsed.streams ?? [];
     const matching = streams.filter((s) => s.tags?.language === lang);
     if (matching.length === 0) return null;
-    const dialogue = matching.find((s) => {
+
+    const textStreams = matching.filter((s) => TEXT_SUBTITLE_CODECS.has((s.codec_name ?? '').toLowerCase()));
+    const pool = textStreams.length > 0 ? textStreams : matching;
+
+    const dialogue = pool.find((s) => {
       const title = (s.tags?.title ?? '').toLowerCase();
       return !title.includes('sign') && !title.includes('song');
     });
-    const selected = dialogue ?? matching[0];
+    const selected = dialogue ?? pool[0];
     return {
       index: selected.index,
       codec: (selected.codec_name ?? 'ass').toLowerCase(),

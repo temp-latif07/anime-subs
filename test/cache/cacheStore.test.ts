@@ -92,8 +92,9 @@ describe('CacheStore', () => {
     const rawDb = (store as unknown as { db: import('better-sqlite3').Database }).db;
     rawDb.exec("ALTER TABLE cache ADD COLUMN tier INTEGER");
     rawDb.prepare("INSERT INTO cache (key, status, tier, file_path, updated_at, provider) VALUES (?, 'ready', 3, '/tmp/x.vtt', ?, NULL)")
-      .run('154587:10:eng:extraction', Date.now());
+      .run('154587:10:eng', Date.now());
     const migrated = store.get({ ...key, provider: 'extraction' as const });
+    expect(migrated).not.toBeNull();
     expect(migrated?.provider).toBe('extraction');
   });
 
@@ -112,7 +113,7 @@ describe('CacheStore', () => {
       );
     `);
     oldDb.prepare("INSERT INTO cache (key, status, tier, file_path, updated_at) VALUES (?, 'ready', 1, '/tmp/j.vtt', ?)")
-      .run('154587:10:eng:jimaku', Date.now());
+      .run('154587:10:eng', Date.now());
     oldDb.close();
 
     store = new CacheStore(dbPath, join(dir, 'files'));

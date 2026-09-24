@@ -42,19 +42,23 @@ export class CacheStore {
     if (!hasProvider) {
       this.db.exec("ALTER TABLE cache ADD COLUMN provider TEXT");
     }
-    this.migrateTierColumnIfPresent();
+    this.migrateTierColumnIfPresent(columns);
   }
 
-  private migrateTierColumnIfPresent(): void {
-    const columns = this.db.prepare("PRAGMA table_info(cache)").all() as { name: string }[];
-    const hasTier = columns.some((c) => c.name === 'tier');
+  private migrateTierColumnIfPresent(columns?: { name: string }[]): void {
+    const cols = columns ?? (this.db.prepare("PRAGMA table_info(cache)").all() as { name: string }[]);
+    const hasTier = cols.some((c) => c.name === 'tier');
     if (!hasTier) return;
     const TIER_TO_PROVIDER: Record<number, CacheProvider> = { 1: 'jimaku', 2: 'animetosho', 3: 'extraction' };
     const rows = this.db.prepare("SELECT key, tier FROM cache WHERE provider IS NULL AND tier IS NOT NULL").all() as { key: string; tier: number }[];
-    const update = this.db.prepare('UPDATE cache SET provider = ? WHERE key = ?');
+    const update = this.db.prepare('UPDATE OR REPLACE cache SET provider = ?, key = ? WHERE key = ?');
     for (const row of rows) {
       const provider = TIER_TO_PROVIDER[row.tier];
-      if (provider) update.run(provider, row.key);
+      if (provider) {
+        const parts = row.key.split(':');
+        const newKey = parts.length === 3 ? `${row.key}:${provider}` : row.key;
+        update.run(provider, newKey, row.key);
+      }
     }
   }
 
@@ -62,6 +66,18 @@ export class CacheStore {
     let row = this.db
       .prepare('SELECT status, provider, file_path, updated_at FROM cache WHERE key = ?')
       .get(keyId(key)) as { status: CacheStatus; provider: CacheProvider | null; file_path: string | null; updated_at: number } | undefined;
+    if (!row) {
+      const legacyKey = `${key.anilistId}:${key.episode}:${key.lang}`;
+      const legacyRow = this.db
+        .prepare('SELECT 1 FROM cache WHERE key = ?')
+        .get(legacyKey);
+      if (legacyRow) {
+        this.migrateTierColumnIfPresent();
+        row = this.db
+          .prepare('SELECT status, provider, file_path, updated_at FROM cache WHERE key = ?')
+          .get(keyId(key)) as { status: CacheStatus; provider: CacheProvider | null; file_path: string | null; updated_at: number } | undefined;
+      }
+    }
     if (!row) return null;
     if (row.status === 'ready' && row.provider === null) {
       this.migrateTierColumnIfPresent();

@@ -11,10 +11,25 @@ interface ToshoSearchResult {
   num_files: number;
 }
 
-interface ToshoAttachment {
+export interface ToshoAttachment {
   id: number;
   type: string;
-  info?: { codec?: string; lang?: string; tracknum?: number };
+  size?: number;
+  info?: {
+    codec?: string;
+    lang?: string;
+    tracknum?: number;
+    forced?: number;
+    default?: number;
+    name?: string;
+  };
+}
+
+export function isForcedOrSignsAttachment(info?: ToshoAttachment['info']): boolean {
+  if (!info) return false;
+  if (info.forced === 1) return true;
+  const name = (info.name ?? '').toLowerCase();
+  return name.includes('forced') || name.includes('sign') || name.includes('song');
 }
 
 interface ToshoFile {
@@ -141,8 +156,22 @@ export async function findAnimeToshoSubtitle(
       }
 
       const subtitleAttachments = (targetFile.attachments ?? []).filter(
-        (a) => a.type === 'subtitle' && a.info?.lang === lang && a.info?.codec && a.info.tracknum !== undefined,
+        (a) =>
+          a.type === 'subtitle' &&
+          a.info?.lang === lang &&
+          a.info?.codec &&
+          a.info.tracknum !== undefined &&
+          !isForcedOrSignsAttachment(a.info),
       );
+
+      subtitleAttachments.sort((a, b) => {
+        const aDef = a.info?.default === 1 ? 1 : 0;
+        const bDef = b.info?.default === 1 ? 1 : 0;
+        if (aDef !== bDef) {
+          return bDef - aDef;
+        }
+        return (b.size ?? 0) - (a.size ?? 0);
+      });
 
       for (const attachment of subtitleAttachments) {
         const url = buildAttachmentUrl(

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { findAnimeToshoSubtitle, parseEpisodeNumber } from '../../src/providers/animetoshoProvider.js';
+import { findAnimeToshoSubtitle, parseEpisodeNumber, isForcedOrSignsAttachment } from '../../src/providers/animetoshoProvider.js';
 
 describe('findAnimeToshoSubtitle', () => {
   let server: Server;
@@ -10,6 +10,9 @@ describe('findAnimeToshoSubtitle', () => {
   let compressedAssSubtitle: Buffer;
   let compressedSrtSubtitle: Buffer;
   let compressedJpSrtSubtitle: Buffer;
+  let compressedFullDialogueAss: Buffer;
+  let compressedDefaultAss: Buffer;
+  let compressedForcedAss: Buffer;
   const expectedAssPath = '/storage/attach/002b205c/%5BGroup%5D%20Show%20-%2005%20(1080p)%20%5BABCD1234%5D_track3.eng.ass.xz';
   const expectedSrtPath = '/storage/attach/00000064/Show%20S01E06_track2.eng.srt.xz';
   const expectedJpSrtPath = '/storage/attach/00000320/Show%20S01E08_track2.eng.srt.xz';
@@ -28,6 +31,15 @@ describe('findAnimeToshoSubtitle', () => {
     });
     compressedJpSrtSubtitle = execFileSync('xz', ['-c'], {
       input: Buffer.from('1\n00:00:00,000 --> 00:00:01,000\nこれは日本語の字幕です。英語はありません。\n'),
+    });
+    compressedFullDialogueAss = execFileSync('xz', ['-c'], {
+      input: Buffer.from('[Script Info]\nTitle: Test\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Full dialogue subtitle line\n'),
+    });
+    compressedDefaultAss = execFileSync('xz', ['-c'], {
+      input: Buffer.from('[Script Info]\nTitle: Test\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Default track subtitle line\n'),
+    });
+    compressedForcedAss = execFileSync('xz', ['-c'], {
+      input: Buffer.from('[Script Info]\nTitle: Test\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Forced signs line only\n'),
     });
 
     server = createServer((req, res) => {
@@ -71,6 +83,14 @@ describe('findAnimeToshoSubtitle', () => {
           res.end(JSON.stringify([
             { id: 50, title: '[Group] FlakyShow - 05 [1080p].mkv', status: 'complete', num_files: 1 },
             { id: 51, title: '[Group] FlakyShow - 05 (alt) [720p].mkv', status: 'complete', num_files: 1 },
+          ]));
+        } else if (aid === '69999') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 60, title: '[Group] Show - 01 [1080p].mkv', status: 'complete', num_files: 1 },
+            { id: 61, title: '[Group] Show - 02 [1080p].mkv', status: 'complete', num_files: 1 },
+            { id: 62, title: '[Group] Show - 03 [1080p].mkv', status: 'complete', num_files: 1 },
+            { id: 63, title: '[Group] Show - 04 [1080p].mkv', status: 'complete', num_files: 1 },
           ]));
         } else if (!aid && q && (q.startsWith('Fallback Show') || q.startsWith('Fallback  Show'))) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -185,6 +205,49 @@ describe('findAnimeToshoSubtitle', () => {
             ],
           }],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '60') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] Show - 01 [1080p].mkv',
+            attachments: [
+              { id: 6001, type: 'subtitle', size: 6000, info: { codec: 'ASS', lang: 'eng', tracknum: 1, forced: 1 } },
+              { id: 6002, type: 'subtitle', size: 35000, info: { codec: 'ASS', lang: 'eng', tracknum: 2, forced: 0 } },
+            ],
+          }],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '61') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] Show - 02 [1080p].mkv',
+            attachments: [
+              { id: 6101, type: 'subtitle', size: 10000, info: { codec: 'ASS', lang: 'eng', tracknum: 1, name: 'CR ASS) English [Forced]' } },
+              { id: 6102, type: 'subtitle', size: 15000, info: { codec: 'ASS', lang: 'eng', tracknum: 2, name: 'English (Full)' } },
+            ],
+          }],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '62') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] Show - 03 [1080p].mkv',
+            attachments: [
+              { id: 6201, type: 'subtitle', size: 40000, info: { codec: 'ASS', lang: 'eng', tracknum: 1, default: 0 } },
+              { id: 6202, type: 'subtitle', size: 25000, info: { codec: 'ASS', lang: 'eng', tracknum: 2, default: 1 } },
+            ],
+          }],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '63') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] Show - 04 [1080p].mkv',
+            attachments: [
+              { id: 6301, type: 'subtitle', size: 5000, info: { codec: 'ASS', lang: 'eng', tracknum: 1, forced: 1, name: 'Signs & Songs' } },
+            ],
+          }],
+        }));
       } else if (url.pathname === expectedAssPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
@@ -209,6 +272,18 @@ describe('findAnimeToshoSubtitle', () => {
       } else if (url.pathname === expectedFlakySrtPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedSrtSubtitle);
+      } else if (url.pathname.includes('00001771') || url.pathname.includes('000017d5') || url.pathname.includes('0000189d')) {
+        // 6001, 6101, 6301 are forced
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedForcedAss);
+      } else if (url.pathname.includes('00001772') || url.pathname.includes('000017d6') || url.pathname.includes('00001839')) {
+        // 6002, 6102, 6201 are full dialogue
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedFullDialogueAss);
+      } else if (url.pathname.includes('0000183a')) {
+        // 6202 is default track
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedDefaultAss);
       } else {
         res.writeHead(404);
         res.end();
@@ -346,8 +421,34 @@ describe('findAnimeToshoSubtitle', () => {
 
   it('falls back to a broader aid-only search to catch batch releases the q=-filtered search missed', async () => {
     const result = await findAnimeToshoSubtitle(39999, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
-    expect(result.found).toBe(true);
     expect(result.vttContent).toContain('AnimeTosho fixture line');
+  });
+
+  it('filters out forced tracks and selects the full dialogue subtitle track based on size', async () => {
+    // ID 60 has two English attachments: Track 1 (Forced, 6KB) and Track 2 (Full, 35KB)
+    const result = await findAnimeToshoSubtitle(69999, 1, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('Full dialogue subtitle line');
+  });
+
+  it('filters out tracks whose name contains "[Forced]" or "Signs" even if forced flag is 0 or omitted', async () => {
+    // ID 61 has Track 1 with name "English [Forced]" (no forced flag) and Track 2 with name "Full Dialogue"
+    const result = await findAnimeToshoSubtitle(69999, 2, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('Full dialogue subtitle line');
+  });
+
+  it('prioritizes default: 1 attachments over non-default attachments', async () => {
+    // ID 62 has Track 1 (default: 0, 40KB) and Track 2 (default: 1, 25KB)
+    const result = await findAnimeToshoSubtitle(69999, 3, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('Default track subtitle line');
+  });
+
+  it('returns found: false when all attachments for the requested language are forced or signs/songs', async () => {
+    // ID 63 has only forced/signs attachments for English
+    const result = await findAnimeToshoSubtitle(69999, 4, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(false);
   });
 
   it('correctly parses various episode numbering conventions with parseEpisodeNumber', () => {
@@ -362,6 +463,35 @@ describe('findAnimeToshoSubtitle', () => {
     expect(parseEpisodeNumber('[Group] Show - 06 (1080p).mkv')).toBe(6);
     expect(parseEpisodeNumber('[Group] Show - 06 [1080p].mkv')).toBe(6);
     expect(parseEpisodeNumber('Random Title Without Episode.mkv')).toBeNull();
+  });
+});
+
+describe('isForcedOrSignsAttachment', () => {
+  it('returns false when info is undefined', () => {
+    expect(isForcedOrSignsAttachment(undefined)).toBe(false);
+  });
+
+  it('returns true when forced === 1', () => {
+    expect(isForcedOrSignsAttachment({ forced: 1 })).toBe(true);
+  });
+
+  it('returns false when forced === 0 and name does not contain forced/signs/songs', () => {
+    expect(isForcedOrSignsAttachment({ forced: 0, name: 'English (Full)' })).toBe(false);
+  });
+
+  it('returns true when name contains forced in various casings', () => {
+    expect(isForcedOrSignsAttachment({ name: 'CR ASS) English [Forced]' })).toBe(true);
+    expect(isForcedOrSignsAttachment({ name: 'FORCED' })).toBe(true);
+  });
+
+  it('returns true when name contains sign or signs', () => {
+    expect(isForcedOrSignsAttachment({ name: 'Signs & Songs' })).toBe(true);
+    expect(isForcedOrSignsAttachment({ name: 'Sign' })).toBe(true);
+  });
+
+  it('returns true when name contains song or songs', () => {
+    expect(isForcedOrSignsAttachment({ name: 'Songs only' })).toBe(true);
+    expect(isForcedOrSignsAttachment({ name: 'Song' })).toBe(true);
   });
 });
 

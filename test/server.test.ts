@@ -62,7 +62,12 @@ describe('HTTP contract', () => {
     const res = await fetch(`${baseUrl}/manifest.json`);
     expect(res.status).toBe(200);
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    expect(await res.json()).toMatchObject({ id: 'org.animesubs', resources: ['subtitles'], types: ['series', 'anime'] });
+    expect(await res.json()).toMatchObject({
+      id: 'org.animesubs',
+      resources: ['subtitles'],
+      types: ['series', 'anime'],
+      idPrefixes: expect.arrayContaining(['tt']),
+    });
   });
 
   it('returns an empty subtitles array for an unresolvable id', async () => {

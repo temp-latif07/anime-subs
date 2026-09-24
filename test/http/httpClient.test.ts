@@ -29,6 +29,13 @@ describe('httpClient', () => {
       } else if (req.url === '/headers') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ auth: req.headers['authorization'] ?? null }));
+      } else if (req.url === '/post' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ received: JSON.parse(body) }));
+        });
       } else {
         res.writeHead(404);
         res.end();
@@ -48,6 +55,15 @@ describe('httpClient', () => {
   it('passes custom headers through', async () => {
     const result = await fetchJson<{ auth: string }>(`${baseUrl}/headers`, { headers: { Authorization: 'Bearer xyz' } });
     expect(result.auth).toBe('Bearer xyz');
+  });
+
+  it('sends POST requests with body', async () => {
+    const result = await fetchJson<{ received: { foo: string } }>(`${baseUrl}/post`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ foo: 'bar' }),
+    });
+    expect(result.received).toEqual({ foo: 'bar' });
   });
 
   it('fetches raw bytes as a Buffer', async () => {

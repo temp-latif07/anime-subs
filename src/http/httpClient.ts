@@ -1,6 +1,8 @@
 export interface FetchOptions {
   headers?: Record<string, string>;
   timeoutMs?: number;
+  method?: 'GET' | 'POST';
+  body?: string;
 }
 
 export class HttpTimeoutError extends Error {
@@ -19,10 +21,15 @@ async function timedFetch<T>(
   const timeoutMs = opts.timeoutMs ?? 8000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { headers: opts.headers, signal: controller.signal });
+    const res = await fetch(url, {
+      method: opts.method ?? 'GET',
+      headers: opts.headers,
+      body: opts.body,
+      signal: controller.signal,
+    });
     if (!res.ok) {
       await res.body?.cancel().catch(() => {});
-      throw new Error(`GET ${url} failed: HTTP ${res.status}`);
+      throw new Error(`${opts.method ?? 'GET'} ${url} failed: HTTP ${res.status}`);
     }
     return await consume(res);
   } catch (err) {

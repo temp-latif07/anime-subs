@@ -19,6 +19,7 @@ export interface ProviderResult {
   found: boolean;
   vttContent?: string;
   seriesNotFound?: boolean;
+  quotaSkipped?: boolean;
 }
 
 export interface SubtitleCandidate {

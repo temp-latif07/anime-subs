@@ -12,6 +12,7 @@ export interface Config {
   logLevel: string;
   openSubtitlesApiKey: string;
   openSubtitlesDailyQuota: number;
+  vttWaitMs: number;
 }
 
 function requireEnv(env: NodeJS.ProcessEnv, name: string): string {
@@ -61,6 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     probeTimeoutMs: requireInt(env, 'PROBE_TIMEOUT_MS', 15000),
     logLevel: env.LOG_LEVEL ?? 'info',
     openSubtitlesApiKey: requireEnv(env, 'OPENSUBTITLES_API_KEY'),
-    openSubtitlesDailyQuota: requireInt(env, 'OPENSUBTITLES_DAILY_QUOTA', 5),
+    openSubtitlesDailyQuota: requireInt(env, 'OPENSUBTITLES_DAILY_QUOTA', 100),
+    vttWaitMs: requireInt(env, 'VTT_WAIT_MS', 20000),
   };
 }

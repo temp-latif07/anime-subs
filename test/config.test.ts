@@ -63,8 +63,13 @@ describe('loadConfig', () => {
     expect(() => loadConfig(env as NodeJS.ProcessEnv)).toThrow(/OPENSUBTITLES_API_KEY/);
   });
 
-  it('defaults openSubtitlesDailyQuota to 5 and reads OPENSUBTITLES_DAILY_QUOTA', () => {
-    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(5);
-    expect(loadConfig({ ...baseEnv, OPENSUBTITLES_DAILY_QUOTA: '100' } as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(100);
+  it('defaults openSubtitlesDailyQuota to 100 and reads OPENSUBTITLES_DAILY_QUOTA', () => {
+    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(100);
+    expect(loadConfig({ ...baseEnv, OPENSUBTITLES_DAILY_QUOTA: '200' } as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(200);
+  });
+
+  it('defaults vttWaitMs to 20000ms and reads VTT_WAIT_MS', () => {
+    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).vttWaitMs).toBe(20000);
+    expect(loadConfig({ ...baseEnv, VTT_WAIT_MS: '5000' } as NodeJS.ProcessEnv).vttWaitMs).toBe(5000);
   });
 });

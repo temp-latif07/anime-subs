@@ -3,7 +3,15 @@ import { readFileSync, existsSync } from 'node:fs';
 import { manifest } from './manifest.js';
 import { handleSubtitlesRequest, type SubtitlesHandlerDeps } from './subtitlesHandler.js';
 import type { CacheStore } from './cache/cacheStore.js';
+import type { CacheProvider } from './types.js';
 import { normalizeVtt } from './ffmpeg/vttUtils.js';
+
+const PROVIDER_LABELS: Record<CacheProvider, string> = {
+  jimaku: 'Jimaku',
+  animetosho: 'AnimeTosho',
+  opensubtitles: 'OpenSubtitles',
+  extraction: 'Extracted',
+};
 
 export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStore): Express {
   const app = express();
@@ -39,9 +47,13 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
       const host = req.get('host');
       const protocol = req.protocol;
       const origin = host ? `${protocol}://${host}` : '';
-      const subtitles = result.subtitles.map((sub, i) => ({
-        id: `${sub.lang}-${i + 1}`,
-        lang: sub.lang,
+
+      const countByLang = new Map<string, number>();
+      for (const sub of result.subtitles) countByLang.set(sub.lang, (countByLang.get(sub.lang) ?? 0) + 1);
+
+      const subtitles = result.subtitles.map((sub) => ({
+        id: `${sub.lang}-${sub.provider}`,
+        lang: (countByLang.get(sub.lang) ?? 0) > 1 ? `${sub.lang} (${PROVIDER_LABELS[sub.provider]})` : sub.lang,
         url: sub.url.startsWith('http://') || sub.url.startsWith('https://')
           ? sub.url
           : `${origin}${sub.url.startsWith('/') ? '' : '/'}${sub.url}`,
@@ -53,24 +65,32 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
     }
   });
 
-  app.get('/vtt/:anilistId/:episode/:lang.vtt', async (req, res) => {
+  app.get('/vtt/:anilistId/:episode/:lang/:provider.vtt', async (req, res) => {
     const key = {
       anilistId: parseInt(req.params.anilistId, 10),
       episode: parseInt(req.params.episode, 10),
       lang: req.params.lang,
+      provider: req.params.provider as CacheProvider,
     };
     let entry = cache.get(key);
 
     const inFlight = cache.getInFlight(key);
     if (inFlight) {
+      let clientGone = false;
+      const onClose = () => { clientGone = true; };
+      req.on('close', onClose);
       try {
         await Promise.race([
           inFlight,
-          new Promise((resolve) => setTimeout(resolve, 35000)),
+          new Promise((resolve) => setTimeout(resolve, handlerDeps.config.vttWaitMs)),
+          new Promise((resolve) => req.once('close', resolve)),
         ]);
       } catch {
         // extraction finished or failed; re-check cache below
+      } finally {
+        req.off('close', onClose);
       }
+      if (clientGone) return; // response would be discarded anyway; skip the write
       entry = cache.get(key);
     }
 
@@ -79,7 +99,7 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
     if (entry?.status === 'ready' && entry.filePath && existsSync(entry.filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=86400');
       const content = readFileSync(entry.filePath, 'utf-8');
-      res.send(normalizeVtt(content));
+      res.send(normalizeVtt(content, key.lang));
       return;
     }
 

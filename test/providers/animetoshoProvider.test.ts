@@ -421,6 +421,7 @@ describe('findAnimeToshoSubtitle', () => {
 
   it('falls back to a broader aid-only search to catch batch releases the q=-filtered search missed', async () => {
     const result = await findAnimeToshoSubtitle(39999, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
     expect(result.vttContent).toContain('AnimeTosho fixture line');
   });
 

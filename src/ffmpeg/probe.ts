@@ -140,6 +140,7 @@ export async function findSubtitleStream(
   sourceUrl: string,
   lang: string,
   timeoutMs = 30000,
+  probeTimeoutMs = 15000,
 ): Promise<FoundSubtitleStream | null> {
   const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
 
@@ -184,7 +185,7 @@ export async function findSubtitleStream(
       '-select_streams', 's',
       sourceUrl,
     ],
-    timeoutMs,
+    Math.min(timeoutMs, probeTimeoutMs),
   );
   return parseSubtitleStreams(output, lang);
 }
@@ -193,7 +194,8 @@ export async function findSubtitleStreamIndex(
   sourceUrl: string,
   lang: string,
   timeoutMs = 30000,
+  probeTimeoutMs = 15000,
 ): Promise<number | null> {
-  const result = await findSubtitleStream(sourceUrl, lang, timeoutMs);
+  const result = await findSubtitleStream(sourceUrl, lang, timeoutMs, probeTimeoutMs);
   return result?.index ?? null;
 }

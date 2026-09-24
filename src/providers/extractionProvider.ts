@@ -14,6 +14,7 @@ export interface ExtractionParams {
   queue: ExtractionQueue;
   extractionTimeoutMs: number;
   providerTimeoutMs: number;
+  probeTimeoutMs?: number;
   mediaType?: string;
   streamUrls?: Promise<string[]> | string[];
 }
@@ -37,6 +38,7 @@ export async function runExtractionTier(params: ExtractionParams): Promise<Provi
           streamUrl,
           params.lang,
           params.extractionTimeoutMs,
+          params.probeTimeoutMs,
         );
         if (stream === null) continue;
         const vttContent = await extractSubtitleToVtt(

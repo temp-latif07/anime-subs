@@ -8,6 +8,7 @@ export interface Config {
   extractionConcurrency: number;
   extractionTimeoutMs: number;
   providerTimeoutMs: number;
+  probeTimeoutMs: number;
   logLevel: string;
 }
 
@@ -55,6 +56,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     extractionConcurrency: requireInt(env, 'EXTRACTION_CONCURRENCY', 1),
     extractionTimeoutMs: requireInt(env, 'EXTRACTION_TIMEOUT_MS', 900000),
     providerTimeoutMs: requireInt(env, 'PROVIDER_TIMEOUT_MS', 8000),
+    probeTimeoutMs: requireInt(env, 'PROBE_TIMEOUT_MS', 15000),
     logLevel: env.LOG_LEVEL ?? 'info',
   };
 }

@@ -26,7 +26,7 @@ describe('HTTP contract', () => {
     const config: Config = {
       port: 0, dataDir: dir, streamAddonUrl: 'https://stream.example.com/manifest.json',
       jimakuApiKey: 'key', subtitleLanguages: ['eng'], negativeCacheTtlHours: 24,
-      extractionConcurrency: 1, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, logLevel: 'info',
+      extractionConcurrency: 1, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
     };
 
     const app = createServer({

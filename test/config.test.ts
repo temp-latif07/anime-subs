@@ -16,6 +16,12 @@ describe('loadConfig', () => {
     expect(config.extractionConcurrency).toBe(1);
     expect(config.extractionTimeoutMs).toBe(900000);
     expect(config.providerTimeoutMs).toBe(8000);
+    expect(config.probeTimeoutMs).toBe(15000);
+  });
+
+  it('defaults probeTimeoutMs to 15000ms and reads PROBE_TIMEOUT_MS', () => {
+    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).probeTimeoutMs).toBe(15000);
+    expect(loadConfig({ ...baseEnv, PROBE_TIMEOUT_MS: '5000' } as NodeJS.ProcessEnv).probeTimeoutMs).toBe(5000);
   });
 
   it('parses comma-separated languages, trimming whitespace', () => {

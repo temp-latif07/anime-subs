@@ -163,6 +163,7 @@ function startExtractionInBackground(
     queue: deps.queue,
     extractionTimeoutMs: deps.config.extractionTimeoutMs,
     providerTimeoutMs: deps.config.providerTimeoutMs,
+    probeTimeoutMs: deps.config.probeTimeoutMs,
     mediaType,
     streamUrls,
   })

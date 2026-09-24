@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { parseSubtitleStreams } from '../../src/ffmpeg/probe.js';
+import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { parseSubtitleStreams, findSubtitleStream } from '../../src/ffmpeg/probe.js';
+
+let mockSpawnChild: any = null;
+vi.mock('node:child_process', () => ({
+  spawn: vi.fn(() => mockSpawnChild),
+}));
 
 describe('parseSubtitleStreams', () => {
   it('prefers a text-based subtitle codec over a bitmap codec for the same language', () => {
@@ -79,3 +85,91 @@ describe('parseSubtitleStreams', () => {
     expect(parseSubtitleStreams(JSON.stringify({ streams: [] }), 'eng')).toBeNull();
   });
 });
+
+describe('findSubtitleStream fallback timeout', () => {
+  it('caps the remote-ffprobe fallback to probeTimeoutMs, not the full extraction timeout', async () => {
+    const mockChild = new EventEmitter() as any;
+    mockChild.stdout = new EventEmitter();
+    mockChild.stderr = new EventEmitter();
+    mockChild.kill = vi.fn();
+    mockSpawnChild = mockChild;
+
+    vi.useFakeTimers();
+
+    try {
+      const probePromise = findSubtitleStream('custom://stalled-stream', 'eng', 900000, 50);
+      let error: any = null;
+      probePromise.catch((err) => {
+        error = err;
+      });
+
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(error).not.toBeNull();
+      expect(error.message).toContain('ffprobe timed out after 50ms');
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
+    } finally {
+      vi.useRealTimers();
+      mockSpawnChild = null;
+    }
+  });
+
+  it('caps the remote-ffprobe fallback to timeoutMs if timeoutMs is smaller than probeTimeoutMs', async () => {
+    const mockChild = new EventEmitter() as any;
+    mockChild.stdout = new EventEmitter();
+    mockChild.stderr = new EventEmitter();
+    mockChild.kill = vi.fn();
+    mockSpawnChild = mockChild;
+
+    vi.useFakeTimers();
+
+    try {
+      const probePromise = findSubtitleStream('custom://stalled-stream', 'eng', 30, 5000);
+      let error: any = null;
+      probePromise.catch((err) => {
+        error = err;
+      });
+
+      await vi.advanceTimersByTimeAsync(30);
+
+      expect(error).not.toBeNull();
+      expect(error.message).toContain('ffprobe timed out after 30ms');
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
+    } finally {
+      vi.useRealTimers();
+      mockSpawnChild = null;
+    }
+  });
+
+  it('defaults probeTimeoutMs to 15000ms when omitted', async () => {
+    const mockChild = new EventEmitter() as any;
+    mockChild.stdout = new EventEmitter();
+    mockChild.stderr = new EventEmitter();
+    mockChild.kill = vi.fn();
+    mockSpawnChild = mockChild;
+
+    vi.useFakeTimers();
+
+    try {
+      const probePromise = findSubtitleStream('custom://stalled-stream', 'eng', 900000);
+      let error: any = null;
+      probePromise.catch((err) => {
+        error = err;
+      });
+
+      // After 5000ms it should NOT have timed out yet
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(error).toBeNull();
+
+      // At 15000ms it should time out
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(error).not.toBeNull();
+      expect(error.message).toContain('ffprobe timed out after 15000ms');
+      expect(mockChild.kill).toHaveBeenCalledWith('SIGKILL');
+    } finally {
+      vi.useRealTimers();
+      mockSpawnChild = null;
+    }
+  });
+});
+

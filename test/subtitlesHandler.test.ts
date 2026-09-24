@@ -29,7 +29,7 @@ const dataset = AnimeDataset.buildFromRaw({
 const baseConfig: Config = {
   port: 7000, dataDir: '/tmp', streamAddonUrl: 'https://stream.example.com/manifest.json',
   jimakuApiKey: 'key', subtitleLanguages: ['eng'], negativeCacheTtlHours: 24,
-  extractionConcurrency: 1, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, logLevel: 'info',
+  extractionConcurrency: 1, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
 };
 
 describe('handleSubtitlesRequest', () => {
@@ -216,6 +216,7 @@ describe('handleSubtitlesRequest', () => {
     expect(passedParams).not.toBeNull();
     expect(passedParams.streamUrls).toBeDefined();
     expect(passedParams.streamUrls instanceof Promise).toBe(true);
+    expect(passedParams.probeTimeoutMs).toBe(deps.config.probeTimeoutMs);
   });
 
   it('passes resolved anime title to animetoshoProvider for fallback searching', async () => {

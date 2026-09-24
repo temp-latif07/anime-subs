@@ -42,3 +42,24 @@ export async function fetchJson<T>(url: string, opts: FetchOptions = {}): Promis
 export async function fetchBuffer(url: string, opts: FetchOptions = {}): Promise<Buffer> {
   return timedFetch(url, opts, async (res) => Buffer.from(await res.arrayBuffer()));
 }
+
+export async function fetchBufferCapped(url: string, maxBytes: number, opts: FetchOptions = {}): Promise<Buffer> {
+  return timedFetch(url, opts, async (res) => {
+    if (!res.body) return Buffer.alloc(0);
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (total < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        total += value.length;
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+    return Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, maxBytes);
+  });
+}
+

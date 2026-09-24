@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { fetchBuffer } from '../http/httpClient.js';
+import { fetchBufferCapped } from '../http/httpClient.js';
 
 export interface FoundSubtitleStream {
   index: number;
@@ -145,7 +145,7 @@ export async function findSubtitleStream(
 
   if (isHttp) {
     try {
-      const rangeBuffer = await fetchBuffer(sourceUrl, {
+      const rangeBuffer = await fetchBufferCapped(sourceUrl, 2097152, {
         headers: { Range: 'bytes=0-2097151' },
         timeoutMs: Math.min(timeoutMs, 5000),
       });

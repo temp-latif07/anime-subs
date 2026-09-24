@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { fetchJson, fetchBuffer, HttpTimeoutError } from '../../src/http/httpClient.js';
+import { fetchJson, fetchBuffer, fetchBufferCapped, HttpTimeoutError } from '../../src/http/httpClient.js';
 
 describe('httpClient', () => {
   let server: Server;
@@ -14,6 +14,9 @@ describe('httpClient', () => {
       } else if (req.url === '/bytes') {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(Buffer.from([1, 2, 3]));
+      } else if (req.url === '/big-file') {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(Buffer.alloc(10 * 1024 * 1024, 0xaa));
       } else if (req.url === '/slow') {
         setTimeout(() => res.end('too late'), 500);
       } else if (req.url === '/slow-body') {
@@ -49,6 +52,17 @@ describe('httpClient', () => {
 
   it('fetches raw bytes as a Buffer', async () => {
     const buf = await fetchBuffer(`${baseUrl}/bytes`);
+    expect(Array.from(buf)).toEqual([1, 2, 3]);
+  });
+
+  it('fetchBufferCapped stops reading once maxBytes is reached, even if the server ignores Range and sends more', async () => {
+    // server route that responds 200 with a 10MB body regardless of the Range header
+    const buf = await fetchBufferCapped(`${baseUrl}/big-file`, 1024, { timeoutMs: 5000 });
+    expect(buf.length).toBeLessThanOrEqual(1024);
+  });
+
+  it('fetchBufferCapped returns all bytes if body is smaller than maxBytes', async () => {
+    const buf = await fetchBufferCapped(`${baseUrl}/bytes`, 1024);
     expect(Array.from(buf)).toEqual([1, 2, 3]);
   });
 

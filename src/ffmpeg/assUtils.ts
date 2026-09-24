@@ -1,3 +1,5 @@
+import { resolveLinePosition } from './subtitleFormatting.js';
+
 export function assColorToHex(raw: string): string | null {
   if (!raw || typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -177,26 +179,9 @@ export function convertAssToVtt(ass: string, targetLang?: string): string {
 
         if (processedLines.length === 0) continue;
 
-        // Dual speaker detection
-        let formattedText = '';
-        if (processedLines.length > 1) {
-          const hasDifferentColors =
-            processedLines.some((l) => l.includes('<font')) &&
-            processedLines[0].match(/color="([^"]+)"/)?.[1] !==
-              processedLines[1].match(/color="([^"]+)"/)?.[1];
-          const hasExistingDash = processedLines.some((l) => l.startsWith('- '));
-          if (hasDifferentColors || hasExistingDash) {
-            formattedText = processedLines
-              .map((l) => (l.startsWith('- ') ? l : `- ${l}`))
-              .join('\n');
-          } else {
-            formattedText = processedLines.join('\n');
-          }
-        } else {
-          formattedText = processedLines[0];
-        }
+        const formattedText = processedLines.join('\n');
 
-        const settings = isTop ? ' line:10%' : '';
+        const settings = ` ${resolveLinePosition(isTop)}`;
         cues.push({
           start: formatAssTime(start),
           end: formatAssTime(end),

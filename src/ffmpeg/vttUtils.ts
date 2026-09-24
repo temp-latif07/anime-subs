@@ -1,4 +1,5 @@
 import { JAPANESE_CHAR_REGEX } from './assUtils.js';
+import { resolveLinePosition } from './subtitleFormatting.js';
 
 function finalizeCue(
   timing: string,
@@ -28,25 +29,12 @@ function finalizeCue(
 
   if (processedLines.length === 0) return null;
 
-  // Dual speaker detection
-  let textLines = processedLines;
-  if (processedLines.length > 1) {
-    const hasDifferentColors =
-      processedLines.some((l) => l.includes('<font')) &&
-      processedLines[0].match(/color="([^"]+)"/)?.[1] !==
-        processedLines[1].match(/color="([^"]+)"/)?.[1];
-    const hasExistingDash = processedLines.some((l) => l.startsWith('- '));
-    if (hasDifferentColors || hasExistingDash) {
-      textLines = processedLines.map((l) => (l.startsWith('- ') ? l : `- ${l}`));
-    }
-  }
-
   let finalTiming = timing;
-  if (isTop && !finalTiming.includes('line:')) {
-    finalTiming += ' line:10%';
+  if (!finalTiming.includes('line:')) {
+    finalTiming += ` ${resolveLinePosition(isTop)}`;
   }
 
-  return { timing: finalTiming, textLines };
+  return { timing: finalTiming, textLines: processedLines };
 }
 
 export function normalizeVtt(vtt: string, targetLang = 'eng'): string {

@@ -7,8 +7,8 @@ describe('normalizeVtt', () => {
     const normalized = normalizeVtt(raw);
     expect(normalized).toBe(
       'WEBVTT\n\n' +
-      '1\n00:00:04.630 --> 00:00:06.250\nHmm.\n\n' +
-      '2\n00:00:06.250 --> 00:00:07.230\nWhat\'s wrong?\n'
+      '1\n00:00:04.630 --> 00:00:06.250 line:90%,end\nHmm.\n\n' +
+      '2\n00:00:06.250 --> 00:00:07.230 line:90%,end\nWhat\'s wrong?\n'
     );
   });
 
@@ -26,7 +26,7 @@ describe('normalizeVtt', () => {
     const normalized = normalizeVtt(raw);
     expect(normalized).toBe(
       'WEBVTT\n\n' +
-      '1\n00:00:08.270 --> 00:00:11.580\nThe milk tea\nstill seems cold.\n'
+      '1\n00:00:08.270 --> 00:00:11.580 line:90%,end\nThe milk tea\nstill seems cold.\n'
     );
   });
 
@@ -57,13 +57,33 @@ describe('normalizeVtt', () => {
     expect(normalized).toContain('Because of the accident, I decided to practice and dance in the cinema with a cat.');
   });
 
-  it('formats dual-speaker cues with hyphens when different colors are present', () => {
+  it('does not add speaker dashes based on differing colors alone', () => {
     const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\n<font color="#FFFF00">Line A</font>\n<font color="#0000FF">Line B</font>\n';
     const normalized = normalizeVtt(raw);
+    expect(normalized).not.toContain('- ');
     expect(normalized).toContain(
-      '- <font color="#FFFF00">Line A</font>\n' +
-      '- <font color="#0000FF">Line B</font>'
+      '<font color="#FFFF00">Line A</font>\n' +
+      '<font color="#0000FF">Line B</font>'
     );
+  });
+
+  it('does not add speaker dashes when only one of two wrapped lines has a highlighted color', () => {
+    const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\n<font color="#FFFF00">Highlighted word</font>\nPlain second line\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).not.toContain('- ');
+    expect(normalized).toContain('<font color="#FFFF00">Highlighted word</font>\nPlain second line');
+  });
+
+  it('preserves a dash the source subtitle already wrote on a line', () => {
+    const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\n- Are you ready?\n- Always!\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).toContain('- Are you ready?\n- Always!');
+  });
+
+  it('does not synthesize a dash on a second line just because the first line has one', () => {
+    const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\n- Wait!\nI told you\n';
+    const normalized = normalizeVtt(raw);
+    expect(normalized).toContain('- Wait!\nI told you');
   });
 
   it('strips Japanese lines from WebVTT cues when target language is English', () => {

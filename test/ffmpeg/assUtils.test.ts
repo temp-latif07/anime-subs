@@ -37,8 +37,8 @@ Dialogue: 0,0:01:26.00,0:01:28.00,Default,,0,0,0,,Second line.
     const vtt = convertAssToVtt(ass);
     expect(vtt).toBe(
       'WEBVTT\n\n' +
-      '1\n00:01:23.450 --> 00:01:25.100\nHello world!\n\n' +
-      '2\n00:01:26.000 --> 00:01:28.000\nSecond line.\n'
+      '1\n00:01:23.450 --> 00:01:25.100 line:90%,end\nHello world!\n\n' +
+      '2\n00:01:26.000 --> 00:01:28.000 line:90%,end\nSecond line.\n'
     );
   });
 
@@ -76,7 +76,7 @@ Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,Bottom dialogue
 `;
     const vtt = convertAssToVtt(ass);
     expect(vtt).toContain('00:00:01.000 --> 00:00:03.000 line:10%\nSign on top of screen');
-    expect(vtt).toContain('00:00:04.000 --> 00:00:06.000\nBottom dialogue');
+    expect(vtt).toContain('00:00:04.000 --> 00:00:06.000 line:90%,end\nBottom dialogue');
   });
 
   it('preserves italics and bold tags cleanly', () => {
@@ -88,16 +88,58 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\i1}Internal thought{\\i0} a
     expect(vtt).toContain('<i>Internal thought</i> and <b>shouting</b>');
   });
 
-  it('formats dual-speaker dialogue with hyphens when different colors are present', () => {
+  it('does not add speaker dashes based on differing colors alone', () => {
     const ass = `[Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\c&H00FFFF&}Are you ready?\\N{\\c&H00FF00&}Always!
 `;
     const vtt = convertAssToVtt(ass);
+    expect(vtt).not.toContain('- ');
     expect(vtt).toContain(
-      '- <font color="#FFFF00">Are you ready?</font>\n' +
-      '- <font color="#00FF00">Always!</font>'
+      '<font color="#FFFF00">Are you ready?</font>\n' +
+      '<font color="#00FF00">Always!</font>'
     );
+  });
+
+  it('does not add speaker dashes when only one of two wrapped lines has a highlighted color', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\c&H00FFFF&}Highlighted word{\\c}\\NPlain second line
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).not.toContain('- ');
+    expect(vtt).toContain('<font color="#FFFF00">Highlighted word</font>\nPlain second line');
+  });
+
+  it('preserves a dash the source subtitle already wrote on a line', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,- Are you ready?\\N- Always!
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('- Are you ready?\n- Always!');
+  });
+
+  it('does not synthesize a dash on a second line just because the first line has one', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,- Wait!\\NI told you
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('- Wait!\nI told you');
+  });
+
+  it('does not add dashes when a style color and an inline emphasis color both land on the same cue', () => {
+    const ass = `[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: CharacterCyan,Arial,20,&H00FFFF00,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,CharacterCyan,,0,0,0,,Some {\\c&H00FFFF&}word{\\c} here\\NPlain second line
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).not.toContain('- ');
   });
 
   it('strips residual ASS override tags (pos, fad, k, blur, etc.)', () => {

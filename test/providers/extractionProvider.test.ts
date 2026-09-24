@@ -12,6 +12,7 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
   let baseUrl: string;
   let dir: string;
   let mkvBytes: Buffer;
+  let jpMkvBytes: Buffer;
 
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'animesubs-extraction-fixture-'));
@@ -29,6 +30,20 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
     ]);
     mkvBytes = readFileSync(mkvPath);
 
+    const jpSrtPath = join(dir, 'japanese.srt');
+    writeFileSync(jpSrtPath, '1\n00:00:00,000 --> 00:00:02,000\nこれは日本語の字幕です。\n');
+    const jpMkvPath = join(dir, 'japanese.mkv');
+    execFileSync('ffmpeg', [
+      '-v', 'error',
+      '-f', 'lavfi', '-i', 'color=c=red:s=64x64:d=2',
+      '-f', 'srt', '-i', jpSrtPath,
+      '-map', '0:v', '-map', '1:s',
+      '-c:v', 'libx264', '-c:s', 'srt',
+      '-metadata:s:s:0', 'language=eng',
+      jpMkvPath,
+    ]);
+    jpMkvBytes = readFileSync(jpMkvPath);
+
     server = createServer((req, res) => {
       if (req.url === '/stream/series/kitsu:1:1:1.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -42,6 +57,9 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       } else if (req.url === '/video.mkv') {
         res.writeHead(200, { 'Content-Type': 'video/x-matroska', 'Accept-Ranges': 'bytes' });
         res.end(mkvBytes);
+      } else if (req.url === '/japanese.mkv') {
+        res.writeHead(200, { 'Content-Type': 'video/x-matroska', 'Accept-Ranges': 'bytes' });
+        res.end(jpMkvBytes);
       } else {
         res.writeHead(404);
         res.end();
@@ -110,6 +128,37 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       queue: new ExtractionQueue(1),
       extractionTimeoutMs: 30000,
       providerTimeoutMs: 8000,
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('Remote extraction fixture');
+  });
+
+  it('rejects an extraction result that is predominantly Japanese instead of caching it', async () => {
+    const result = await runExtractionTier({
+      streamAddonUrl: `${baseUrl}/manifest.json`,
+      contentId: 'kitsu:1',
+      season: 1,
+      episode: 1,
+      lang: 'eng',
+      queue: new ExtractionQueue(1),
+      extractionTimeoutMs: 30000,
+      providerTimeoutMs: 8000,
+      streamUrls: [`${baseUrl}/japanese.mkv`],
+    });
+    expect(result.found).toBe(false);
+  });
+
+  it('falls through a predominantly Japanese stream to a valid English stream', async () => {
+    const result = await runExtractionTier({
+      streamAddonUrl: `${baseUrl}/manifest.json`,
+      contentId: 'kitsu:1',
+      season: 1,
+      episode: 1,
+      lang: 'eng',
+      queue: new ExtractionQueue(1),
+      extractionTimeoutMs: 30000,
+      providerTimeoutMs: 8000,
+      streamUrls: [`${baseUrl}/japanese.mkv`, `${baseUrl}/video.mkv`],
     });
     expect(result.found).toBe(true);
     expect(result.vttContent).toContain('Remote extraction fixture');

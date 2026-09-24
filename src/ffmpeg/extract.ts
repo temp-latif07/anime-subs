@@ -34,13 +34,57 @@ function runFfmpeg(args: string[], timeoutMs: number): Promise<void> {
 export async function extractSubtitleToVtt(
   sourceUrl: string,
   streamIndex: number,
+  lang: string,
+  codecOrTimeout?: string | number,
+  maybeTimeoutMs?: number,
+): Promise<string>;
+export async function extractSubtitleToVtt(
+  sourceUrl: string,
+  streamIndex: number,
+  codecOrTimeout?: string | number,
+  maybeTimeoutMs?: number,
+): Promise<string>;
+export async function extractSubtitleToVtt(
+  sourceUrl: string,
+  streamIndex: number,
+  langOrCodecOrTimeout?: string | number,
   codecOrTimeout?: string | number,
   maybeTimeoutMs?: number,
 ): Promise<string> {
-  const codec = typeof codecOrTimeout === 'string' ? codecOrTimeout.toLowerCase() : undefined;
-  const timeoutMs = typeof codecOrTimeout === 'number'
-    ? codecOrTimeout
-    : (maybeTimeoutMs ?? 900000);
+  let lang = 'eng';
+  let codec: string | undefined;
+  let timeoutMs = 900000;
+
+  if (typeof langOrCodecOrTimeout === 'number') {
+    timeoutMs = langOrCodecOrTimeout;
+  } else if (typeof langOrCodecOrTimeout === 'string') {
+    if (typeof codecOrTimeout === 'string') {
+      lang = langOrCodecOrTimeout;
+      codec = codecOrTimeout.toLowerCase();
+      if (typeof maybeTimeoutMs === 'number') {
+        timeoutMs = maybeTimeoutMs;
+      }
+    } else if (typeof codecOrTimeout === 'number') {
+      const lower = langOrCodecOrTimeout.toLowerCase();
+      if (lower === 'ass' || lower === 'ssa' || lower === 'srt' || lower === 'subrip' || lower === 'webvtt') {
+        codec = lower;
+        timeoutMs = codecOrTimeout;
+      } else {
+        lang = langOrCodecOrTimeout;
+        timeoutMs = codecOrTimeout;
+      }
+    } else {
+      const lower = langOrCodecOrTimeout.toLowerCase();
+      if (lower === 'ass' || lower === 'ssa' || lower === 'srt' || lower === 'subrip' || lower === 'webvtt') {
+        codec = lower;
+      } else {
+        lang = langOrCodecOrTimeout;
+      }
+      if (typeof maybeTimeoutMs === 'number') {
+        timeoutMs = maybeTimeoutMs;
+      }
+    }
+  }
 
   const dir = mkdtempSync(join(tmpdir(), 'animesubs-extract-'));
   const isHttp = sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://');
@@ -75,7 +119,7 @@ export async function extractSubtitleToVtt(
       const outAssPath = join(dir, 'out.ass');
       try {
         await runFfmpeg([...baseArgs, '-c:s', 'copy', '-y', outAssPath], timeoutMs);
-        return convertAssToVtt(readFileSync(outAssPath, 'utf-8'));
+        return convertAssToVtt(readFileSync(outAssPath, 'utf-8'), lang);
       } catch {
         // Fall back to transcoding below
       }
@@ -83,7 +127,7 @@ export async function extractSubtitleToVtt(
       const outSrtPath = join(dir, 'out.srt');
       try {
         await runFfmpeg([...baseArgs, '-c:s', 'copy', '-y', outSrtPath], timeoutMs);
-        return convertToVtt(readFileSync(outSrtPath), 'srt');
+        return convertToVtt(readFileSync(outSrtPath), 'srt', lang);
       } catch {
         // Fall back to transcoding below
       }
@@ -92,7 +136,7 @@ export async function extractSubtitleToVtt(
     // Default or fallback: transcode to WebVTT directly
     const outVttPath = join(dir, 'out.vtt');
     await runFfmpeg([...baseArgs, '-c:s', 'webvtt', '-y', outVttPath], timeoutMs);
-    return normalizeVtt(readFileSync(outVttPath, 'utf-8'));
+    return normalizeVtt(readFileSync(outVttPath, 'utf-8'), lang);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

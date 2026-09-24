@@ -11,6 +11,7 @@ describe('ffmpeg subtitle extraction (real ffmpeg/ffprobe subprocess)', () => {
   let dir: string;
   let mkvPath: string;
   let assMkvPath: string;
+  let filteringAssMkvPath: string;
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'animesubs-fixture-'));
@@ -41,6 +42,22 @@ describe('ffmpeg subtitle extraction (real ffmpeg/ffprobe subprocess)', () => {
       '-c:v', 'libx264', '-c:s', 'ass',
       '-metadata:s:s:0', 'language=eng',
       assMkvPath,
+    ]);
+
+    const filteringAssPath = join(dir, 'filtering.ass');
+    writeFileSync(
+      filteringAssPath,
+      '[Script Info]\nTitle: Test\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:02.00,OP,,0,0,0,,Romanized lyric line\nDialogue: 0,0:00:02.00,0:00:04.00,Default,,0,0,0,,Hello, how are you?\n',
+    );
+    filteringAssMkvPath = join(dir, 'filtering-ass.mkv');
+    execFileSync('ffmpeg', [
+      '-v', 'error',
+      '-f', 'lavfi', '-i', 'color=c=blue:s=64x64:d=2',
+      '-i', filteringAssPath,
+      '-map', '0:v', '-map', '1:s',
+      '-c:v', 'libx264', '-c:s', 'ass',
+      '-metadata:s:s:0', 'language=eng',
+      filteringAssMkvPath,
     ]);
   });
 
@@ -88,6 +105,18 @@ describe('ffmpeg subtitle extraction (real ffmpeg/ffprobe subprocess)', () => {
     const vtt = await extractSubtitleToVtt(assMkvPath, 1, 'ass');
     expect(vtt).toContain('WEBVTT');
     expect(vtt).toContain('Hello from ASS fixture');
+  });
+
+  it('applies English-only filtering on the ASS stream-copy path', async () => {
+    const vtt = await extractSubtitleToVtt(filteringAssMkvPath, 1, 'ass', 30000);
+    expect(vtt).toContain('Hello, how are you?');
+    expect(vtt).not.toContain('Romanized lyric line');
+  });
+
+  it('preserves lyric lines on the ASS stream-copy path when targetLang is not eng', async () => {
+    const vtt = await extractSubtitleToVtt(filteringAssMkvPath, 1, 'jpn', 'ass', 30000);
+    expect(vtt).toContain('Hello, how are you?');
+    expect(vtt).toContain('Romanized lyric line');
   });
 
   it('converts a standalone SRT buffer to WebVTT', async () => {

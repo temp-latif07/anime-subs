@@ -1,203 +1,78 @@
-import { resolveLinePosition } from './subtitleFormatting.js';
-
-export function assColorToHex(raw: string): string | null {
-  if (!raw || typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  const match = trimmed.match(/^&?[hH]?([0-9a-fA-F]{1,8})&?$/);
-  if (!match) return null;
-  let hex = match[1].padStart(6, '0');
-  if (hex.length === 8) hex = hex.slice(2); // strip alpha if AABBGGRR
-  if (hex.length !== 6) return null;
-  const b = hex.slice(0, 2);
-  const g = hex.slice(2, 4);
-  const r = hex.slice(4, 6);
-  return '#' + (r + g + b).toUpperCase();
-}
-
-function formatAssTime(timeStr: string): string {
-  const parts = timeStr.trim().split(':');
-  let h = '00';
-  let m = '00';
-  let s = '00';
-  let ms = '000';
-  if (parts.length === 3) {
-    h = parts[0].padStart(2, '0');
-    m = parts[1].padStart(2, '0');
-    const secParts = parts[2].split('.');
-    s = secParts[0].padStart(2, '0');
-    ms = (secParts[1] || '0').padEnd(3, '0').slice(0, 3);
-  } else if (parts.length === 2) {
-    m = parts[0].padStart(2, '0');
-    const secParts = parts[1].split('.');
-    s = secParts[0].padStart(2, '0');
-    ms = (secParts[1] || '0').padEnd(3, '0').slice(0, 3);
-  }
-  return `${h}:${m}:${s}.${ms}`;
-}
-
-interface AssCue {
-  start: string;
-  end: string;
-  settings: string;
-  text: string;
-}
+import { compile } from 'ass-compiler';
+import { resolvePosition } from './subtitleFormatting.js';
 
 export const JAPANESE_CHAR_REGEX = /[぀-ゟ゠-ヿ一-鿿㐀-䶿]/;
-const SONG_STYLE_REGEX = /^(opening|op|ending|ed|song|karaoke|lyrics|insert|music)(\b|\d)|kanji|romaji/i;
-const KARAOKE_TAG_REGEX = /\{[^}]*\\k[f|o]?[0-9]+[^}]*\}/i;
+
+function formatVttTime(seconds: number): string {
+  const totalMs = Math.max(0, Math.round(seconds * 1000));
+  const ms = totalMs % 1000;
+  const totalSec = Math.floor(totalMs / 1000);
+  const s = totalSec % 60;
+  const totalMin = Math.floor(totalSec / 60);
+  const m = totalMin % 60;
+  const h = Math.floor(totalMin / 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+}
+
+interface FragmentTag {
+  b?: 0 | 1;
+  i?: 0 | 1;
+  u?: 0 | 1;
+}
+
+function renderFragmentText(tag: FragmentTag, rawText: string): string {
+  let text = rawText.replace(/\\N/g, '\n').replace(/\\n/g, '\n').replace(/\\h/g, ' ');
+  if (tag.b) text = `<b>${text}</b>`;
+  if (tag.i) text = `<i>${text}</i>`;
+  if (tag.u) text = `<u>${text}</u>`;
+  return text;
+}
+
+interface CompiledDialogue {
+  start: number;
+  end: number;
+  alignment: number;
+  pos?: { x: number; y: number };
+  slices: { fragments: { tag: FragmentTag; text: string }[] }[];
+}
+
+function buildCueText(dialogue: CompiledDialogue, targetLang?: string): string | null {
+  let combined = '';
+  for (const slice of dialogue.slices) {
+    for (const fragment of slice.fragments) {
+      combined += renderFragmentText(fragment.tag, fragment.text);
+    }
+  }
+  const lines = combined
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => (targetLang === 'eng' ? !JAPANESE_CHAR_REGEX.test(line) : true));
+  if (lines.length === 0) return null;
+  return lines.join('\n');
+}
 
 export function convertAssToVtt(ass: string, targetLang?: string): string {
   if (!ass || typeof ass !== 'string') return 'WEBVTT\n\n';
 
-  const lines = ass.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const styleColors = new Map<string, string>();
-  let inStyles = false;
-  let inEvents = false;
-  let styleFormat: string[] = [];
-  let eventFormat: string[] = [];
-
-  const cues: AssCue[] = [];
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (line.startsWith('[V4+ Styles]') || line.startsWith('[V4 Styles]')) {
-      inStyles = true;
-      inEvents = false;
-      continue;
-    } else if (line.startsWith('[Events]')) {
-      inEvents = true;
-      inStyles = false;
-      continue;
-    } else if (line.startsWith('[')) {
-      inStyles = false;
-      inEvents = false;
-      continue;
-    }
-
-    if (inStyles) {
-      if (line.startsWith('Format:')) {
-        styleFormat = line.substring(7).split(',').map((s) => s.trim().toLowerCase());
-      } else if (line.startsWith('Style:')) {
-        const values = line.substring(6).split(',').map((s) => s.trim());
-        const nameIdx = styleFormat.indexOf('name');
-        const colorIdx = styleFormat.indexOf('primarycolour');
-        if (nameIdx !== -1 && colorIdx !== -1 && values[nameIdx] && values[colorIdx]) {
-          const hex = assColorToHex(values[colorIdx]);
-          if (hex && hex !== '#FFFFFF') {
-            styleColors.set(values[nameIdx], hex);
-          }
-        }
-      }
-    } else if (inEvents) {
-      if (line.startsWith('Format:')) {
-        eventFormat = line.substring(7).split(',').map((s) => s.trim().toLowerCase());
-      } else if (line.startsWith('Dialogue:')) {
-        const textIdx = eventFormat.indexOf('text');
-        const startIdx = eventFormat.indexOf('start');
-        const endIdx = eventFormat.indexOf('end');
-        const styleIdx = eventFormat.indexOf('style');
-
-        const commaCount = eventFormat.length - 1;
-        const parts: string[] = [];
-        let curr = line.substring(9);
-        for (let i = 0; i < commaCount; i++) {
-          const idx = curr.indexOf(',');
-          if (idx === -1) break;
-          parts.push(curr.substring(0, idx).trim());
-          curr = curr.substring(idx + 1);
-        }
-        parts.push(curr); // remaining is text
-
-        const start = parts[startIdx];
-        const end = parts[endIdx];
-        const style = parts[styleIdx] || '';
-        let text = parts[textIdx] || '';
-
-        if (targetLang === 'eng') {
-          if (SONG_STYLE_REGEX.test(style) || KARAOKE_TAG_REGEX.test(text)) {
-            continue;
-          }
-        }
-
-        // Strip drawing commands: {\p1}...{\p0} or unclosed {\p1}...
-        text = text.replace(/\{[^}]*\\p[1-9][^}]*\}.*?(\{[^}]*\\p0[^}]*\}|$)/gis, '');
-        if (text.trim() === '') continue;
-
-        // Top alignment: \an7, \an8, \an9
-        const isTop = /\{[^}]*\\an[789][^}]*\}/i.test(text);
-
-        // Normalize line breaks
-        text = text.replace(/\\N/g, '\n').replace(/\\n/g, '\n').replace(/\\h/g, ' ');
-
-        // Convert formatting
-        text = text
-          .replace(/\{\\i1?\}/gi, '<i>')
-          .replace(/\{\\i0\}/gi, '</i>')
-          .replace(/\{\\b1?\}/gi, '<b>')
-          .replace(/\{\\b0\}/gi, '</b>')
-          .replace(/\{\\u1?\}/gi, '<u>')
-          .replace(/\{\\u0\}/gi, '</u>');
-
-        // Color handling
-        const linesOfText = text.split('\n');
-        const processedLines = linesOfText
-          .map((l) => {
-            let lineText = l;
-            let openFont = false;
-            lineText = lineText.replace(/\{\\1?c(&?[hH]?[0-9a-fA-F]+&?)\}/gi, (_, colorCode) => {
-              const hex = assColorToHex(colorCode);
-              const prefix = openFont ? '</font>' : '';
-              if (hex && hex !== '#FFFFFF') {
-                openFont = true;
-                return `${prefix}<font color="${hex}">`;
-              }
-              openFont = false;
-              return prefix;
-            });
-            lineText = lineText.replace(/\{\\1?c\}/gi, () => {
-              if (openFont) {
-                openFont = false;
-                return '</font>';
-              }
-              return '';
-            });
-            if (openFont) {
-              lineText += '</font>';
-            }
-
-            // Strip remaining override tags
-            lineText = lineText.replace(/\{[^}]*\}/g, '').trim();
-
-            // If no inline color, apply style color
-            if (!lineText.includes('<font') && styleColors.has(style)) {
-              lineText = `<font color="${styleColors.get(style)}">${lineText}</font>`;
-            }
-            return lineText;
-          })
-          .filter(Boolean)
-          .filter((l) => (targetLang === 'eng' ? !JAPANESE_CHAR_REGEX.test(l) : true));
-
-        if (processedLines.length === 0) continue;
-
-        const formattedText = processedLines.join('\n');
-
-        const settings = ` ${resolveLinePosition(isTop)}`;
-        cues.push({
-          start: formatAssTime(start),
-          end: formatAssTime(end),
-          settings,
-          text: formattedText,
-        });
-      }
-    }
+  let compiled;
+  try {
+    compiled = compile(ass, { defaultInfo: { PlayResX: 384, PlayResY: 288 } });
+  } catch {
+    return 'WEBVTT\n\n';
   }
 
-  // Sort cues by start timestamp
-  cues.sort((a, b) => a.start.localeCompare(b.start));
+  const cuesContent: string[] = [];
+  let index = 1;
+  for (const dialogue of compiled.dialogues as CompiledDialogue[]) {
+    const text = buildCueText(dialogue, targetLang);
+    if (!text) continue;
+    const settings = resolvePosition(dialogue.alignment, dialogue.pos, compiled.width, compiled.height);
+    const start = formatVttTime(dialogue.start);
+    const end = formatVttTime(dialogue.end);
+    cuesContent.push(`${index++}\n${start} --> ${end} ${settings}\n${text}`);
+  }
 
-  if (cues.length === 0) return 'WEBVTT\n\n';
-  const cuesContent = cues
-    .map((c, i) => `${i + 1}\n${c.start} --> ${c.end}${c.settings}\n${c.text}`)
-    .join('\n\n');
-  return `WEBVTT\n\n${cuesContent}\n`;
+  if (cuesContent.length === 0) return 'WEBVTT\n\n';
+  return `WEBVTT\n\n${cuesContent.join('\n\n')}\n`;
 }

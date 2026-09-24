@@ -14,6 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "ass-compiler": "^0.1.16",
     "better-sqlite3": "^13.0.3",
     "express": "^5.2.1",
     "fast-xml-parser": "^5.11.1"

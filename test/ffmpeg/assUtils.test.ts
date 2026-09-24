@@ -1,27 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { convertAssToVtt, assColorToHex } from '../../src/ffmpeg/assUtils.js';
-
-describe('assColorToHex', () => {
-  it('converts ASS BGR hex colors to RGB hex colors', () => {
-    expect(assColorToHex('&H0000FFFF&')).toBe('#FFFF00'); // Yellow
-    expect(assColorToHex('&H00FF0000&')).toBe('#0000FF'); // Blue
-    expect(assColorToHex('&H00FFFF00&')).toBe('#00FFFF'); // Cyan
-    expect(assColorToHex('&H0000FF00&')).toBe('#00FF00'); // Green
-    expect(assColorToHex('&H000000FF&')).toBe('#FF0000'); // Red
-    expect(assColorToHex('&H00FFFFFF&')).toBe('#FFFFFF'); // White
-  });
-
-  it('handles formats without ampersands or with 6 hex digits', () => {
-    expect(assColorToHex('&H00FFFF&')).toBe('#FFFF00');
-    expect(assColorToHex('00FFFF')).toBe('#FFFF00');
-    expect(assColorToHex('&H00FFFF')).toBe('#FFFF00');
-  });
-
-  it('returns null for invalid inputs', () => {
-    expect(assColorToHex('')).toBeNull();
-    expect(assColorToHex('invalid')).toBeNull();
-  });
-});
+import { convertAssToVtt } from '../../src/ffmpeg/assUtils.js';
 
 describe('convertAssToVtt', () => {
   it('converts basic dialogue with normalized timestamps and sequential cue numbers', () => {
@@ -40,32 +18,6 @@ Dialogue: 0,0:01:26.00,0:01:28.00,Default,,0,0,0,,Second line.
       '1\n00:01:23.450 --> 00:01:25.100 line:90%,end\nHello world!\n\n' +
       '2\n00:01:26.000 --> 00:01:28.000 line:90%,end\nSecond line.\n'
     );
-  });
-
-  it('converts inline color tags to <font color="#RRGGBB"> tags', () => {
-    const ass = `[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\c&H00FFFF&}Yellow speaker
-`;
-    const vtt = convertAssToVtt(ass);
-    expect(vtt).toContain('<font color="#FFFF00">Yellow speaker</font>');
-  });
-
-  it('applies non-white style colors to dialogue cues', () => {
-    const ass = `[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,20,&H00FFFFFF,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1
-Style: CharacterCyan,Arial,20,&H00FFFF00,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:01.00,0:00:03.00,CharacterCyan,,0,0,0,,I am speaking in cyan!
-Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,I am default white.
-`;
-    const vtt = convertAssToVtt(ass);
-    expect(vtt).toContain('<font color="#00FFFF">I am speaking in cyan!</font>');
-    expect(vtt).toContain('I am default white.');
-    expect(vtt).not.toContain('<font color="#FFFFFF">');
   });
 
   it('translates top-alignment \\an8 / \\an7 / \\an9 to line:10% cue position', () => {
@@ -88,6 +40,15 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\i1}Internal thought{\\i0} a
     expect(vtt).toContain('<i>Internal thought</i> and <b>shouting</b>');
   });
 
+  it('wraps underlined text in <u> tags', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\u1}Underlined{\\u0} text
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('<u>Underlined</u> text');
+  });
+
   it('does not add speaker dashes based on differing colors alone', () => {
     const ass = `[Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -95,10 +56,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\c&H00FFFF&}Are you ready?\\
 `;
     const vtt = convertAssToVtt(ass);
     expect(vtt).not.toContain('- ');
-    expect(vtt).toContain(
-      '<font color="#FFFF00">Are you ready?</font>\n' +
-      '<font color="#00FF00">Always!</font>'
-    );
+    expect(vtt).toContain('Are you ready?\nAlways!');
   });
 
   it('does not add speaker dashes when only one of two wrapped lines has a highlighted color', () => {
@@ -108,7 +66,7 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\c&H00FFFF&}Highlighted word
 `;
     const vtt = convertAssToVtt(ass);
     expect(vtt).not.toContain('- ');
-    expect(vtt).toContain('<font color="#FFFF00">Highlighted word</font>\nPlain second line');
+    expect(vtt).toContain('Highlighted word\nPlain second line');
   });
 
   it('preserves a dash the source subtitle already wrote on a line', () => {
@@ -142,13 +100,13 @@ Dialogue: 0,0:00:01.00,0:00:03.00,CharacterCyan,,0,0,0,,Some {\\c&H00FFFF&}word{
     expect(vtt).not.toContain('- ');
   });
 
-  it('strips residual ASS override tags (pos, fad, k, blur, etc.)', () => {
+  it('extracts \\pos coordinates into position/line/align cue settings and strips other residual tags cleanly', () => {
     const ass = `[Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\pos(192,200)\\fad(100,100)\\k50\\blur1.5}Clean spoken text
 `;
     const vtt = convertAssToVtt(ass);
-    expect(vtt).toContain('Clean spoken text');
+    expect(vtt).toContain('00:00:01.000 --> 00:00:03.000 position:50% line:69% align:center\nClean spoken text');
     expect(vtt).not.toContain('\\pos');
     expect(vtt).not.toContain('\\fad');
     expect(vtt).not.toContain('{');
@@ -163,29 +121,6 @@ Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,Actual text
     const vtt = convertAssToVtt(ass);
     expect(vtt).not.toContain('m 0 0');
     expect(vtt).toContain('Actual text');
-  });
-
-  it('strips Opening and Ending song styles and karaoke cues', () => {
-    const ass = `[Script Info]
-Title: Test
-ScriptType: v4.00+
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
-Style: OP - Romaji,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
-Style: ED - English,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:01.00,0:00:03.00,OP - Romaji,,0,0,0,,{\\k20}A{\\k30}no {\\k40}hi {\\k50}mita {\\k60}hana
-Dialogue: 0,0:00:02.00,0:00:04.00,Default,,0,0,0,,Hello, how are you?
-Dialogue: 0,0:00:20.00,0:00:23.00,ED - English,,0,0,0,,Like a bird in the sky
-`;
-    const vtt = convertAssToVtt(ass, 'eng');
-    expect(vtt).toContain('Hello, how are you?');
-    expect(vtt).not.toContain('Ano hi mita');
-    expect(vtt).not.toContain('Like a bird in the sky');
   });
 
   it('filters out Japanese script lines from dual-language cues and drops pure Japanese cues', () => {
@@ -208,7 +143,6 @@ Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,I am doing well.
     expect(vtt).not.toContain('こんにちは');
     expect(vtt).not.toContain('おはようございます');
     expect(vtt).toContain('I am doing well.');
-    // Check that there are only 2 cues, not 3
     const cues = vtt.trim().split('\n\n').slice(1);
     expect(cues.length).toBe(2);
   });
@@ -226,27 +160,72 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Wait！ What was that？
     expect(vtt).toContain('Wait！ What was that？');
   });
 
-  it('strips song styles named without a separator, like OP1, Opening, ED2', () => {
+  it('maps \\pos-based signs to percent position/line/align across left, center, and right alignment', () => {
     const ass = `[Script Info]
-Title: Test
-ScriptType: v4.00+
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1
-Style: OP1,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
-Style: Opening,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1
+PlayResX: 200
+PlayResY: 100
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:01.00,0:00:03.00,OP1,,0,0,0,,Romanized lyric line one
-Dialogue: 0,0:00:04.00,0:00:06.00,Opening,,0,0,0,,Romanized lyric line two
-Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,Hello, how are you?
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\an7\\pos(0,0)}Top left sign
+Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\an8\\pos(100,50)}Top center sign
+Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,{\\an9\\pos(200,100)}Top right sign
 `;
-    const vtt = convertAssToVtt(ass, 'eng');
-    expect(vtt).toContain('Hello, how are you?');
-    expect(vtt).not.toContain('Romanized lyric line one');
-    expect(vtt).not.toContain('Romanized lyric line two');
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('00:00:01.000 --> 00:00:03.000 position:0% line:0% align:left\nTop left sign');
+    expect(vtt).toContain('00:00:04.000 --> 00:00:06.000 position:50% line:50% align:center\nTop center sign');
+    expect(vtt).toContain('00:00:07.000 --> 00:00:09.000 position:100% line:100% align:right\nTop right sign');
+  });
+
+  it('reads PlayResX/PlayResY from [Script Info] when present', () => {
+    const ass = `[Script Info]
+PlayResX: 1280
+PlayResY: 720
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\pos(640,360)}Centered sign
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('position:50% line:50% align:center');
+  });
+
+  it('falls back to 384x288 when [Script Info] omits PlayResX/PlayResY', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\pos(192,144)}Centered sign
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('position:50% line:50% align:center');
+  });
+
+  it('returns an empty VTT document instead of throwing for malformed non-ASS input', () => {
+    const garbage = 'this is not ass content at all\n{{{';
+    expect(() => convertAssToVtt(garbage)).not.toThrow();
+    expect(convertAssToVtt(garbage)).toBe('WEBVTT\n\n');
+  });
+
+  it('drops dialogue lines with zero or negative duration', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:05.00,0:00:03.00,Default,,0,0,0,,Reversed duration
+Dialogue: 0,0:00:01.00,0:00:01.00,Default,,0,0,0,,Zero duration
+Dialogue: 0,0:00:02.00,0:00:04.00,Default,,0,0,0,,Valid cue
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).not.toContain('Reversed duration');
+    expect(vtt).not.toContain('Zero duration');
+    expect(vtt).toContain('Valid cue');
+    const cues = vtt.trim().split('\n\n').slice(1);
+    expect(cues.length).toBe(1);
+  });
+
+  it('concatenates text across a mid-line style reset (\\r) into a single cue', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,First part {\\r}Second part
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('First part Second part');
   });
 });
-

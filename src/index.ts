@@ -45,6 +45,10 @@ function tryLoadExistingTable(db: Database.Database): AnimeDataset | null {
     if (!row) return null;
     const count = (db.prepare('SELECT COUNT(*) as c FROM anime_ids').get() as { c: number }).c;
     if (count === 0) return null;
+    const columns = db.prepare("PRAGMA table_info(anime_ids)").all() as { name: string }[];
+    if (!columns.some((c) => c.name === 'imdb_id')) {
+      db.exec('ALTER TABLE anime_ids ADD COLUMN imdb_id TEXT');
+    }
     return AnimeDataset.fromExistingTable(db);
   } catch {
     return null;

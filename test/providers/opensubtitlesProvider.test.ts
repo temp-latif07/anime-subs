@@ -17,13 +17,13 @@ describe('findOpenSubtitlesSubtitle', () => {
       if (url.pathname === '/subtitles' && req.method === 'GET') {
         lastSearchQuery = url.searchParams;
         lastSearchHeaders = req.headers;
-        if (url.searchParams.get('imdb_id') === '1111111') {
+        if (url.searchParams.get('parent_imdb_id') === '1111111') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ data: [{ attributes: { files: [{ file_id: 42 }] } }] }));
-        } else if (url.searchParams.get('imdb_id') === '2222222') {
+        } else if (url.searchParams.get('parent_imdb_id') === '2222222') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ data: [{ attributes: { files: [{ file_id: 99 }] } }] }));
-        } else if (url.searchParams.get('imdb_id') === '3333333') {
+        } else if (url.searchParams.get('parent_imdb_id') === '3333333') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ data: [{ attributes: { files: [] } }] }));
         } else {
@@ -81,9 +81,10 @@ describe('findOpenSubtitlesSubtitle', () => {
     expect(JSON.parse(lastDownloadBody)).toEqual({ file_id: 42 });
   });
 
-  it('searches with numeric imdb_id, season_number, and episode_number', async () => {
+  it('searches with numeric parent_imdb_id (the series-level id, not an episode imdb_id), season_number, and episode_number', async () => {
     await findOpenSubtitlesSubtitle('tt1111111', 2, 9, 'eng', 'test-key', { baseUrl, hasQuota: true });
-    expect(lastSearchQuery?.get('imdb_id')).toBe('1111111');
+    expect(lastSearchQuery?.get('parent_imdb_id')).toBe('1111111');
+    expect(lastSearchQuery?.get('imdb_id')).toBeNull();
     expect(lastSearchQuery?.get('season_number')).toBe('2');
     expect(lastSearchQuery?.get('episode_number')).toBe('9');
     expect(lastSearchQuery?.get('languages')).toBe('en');
@@ -91,7 +92,7 @@ describe('findOpenSubtitlesSubtitle', () => {
 
   it('accepts bare numeric imdbId without tt prefix', async () => {
     await findOpenSubtitlesSubtitle('1111111', 2, 9, 'eng', 'test-key', { baseUrl, hasQuota: true });
-    expect(lastSearchQuery?.get('imdb_id')).toBe('1111111');
+    expect(lastSearchQuery?.get('parent_imdb_id')).toBe('1111111');
   });
 
   it('sends User-Agent and Api-Key headers on search and download', async () => {

@@ -37,6 +37,14 @@ describe('loadOrRefreshDataset', () => {
     db.exec('CREATE TABLE anime_ids (anilist_id INTEGER, anidb_id INTEGER, kitsu_id INTEGER, mal_id INTEGER, title TEXT)');
     await expect(loadOrRefreshDataset(db, undefined, 'http://127.0.0.1:1/unreachable')).rejects.toThrow();
   });
+
+  it('falls back cleanly to a pre-upgrade anime_ids table that predates the imdb_id column, instead of throwing on every query', async () => {
+    const db = new Database(':memory:');
+    db.exec('CREATE TABLE anime_ids (anilist_id INTEGER, anidb_id INTEGER, kitsu_id INTEGER, mal_id INTEGER, title TEXT)');
+    db.exec("INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id, title) VALUES (154587, 17617, NULL, NULL, 'Frieren')");
+    const dataset = await loadOrRefreshDataset(db, undefined, 'http://127.0.0.1:1/unreachable');
+    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: 'Frieren', imdbId: null });
+  });
 });
 
 describe('loadOrRefreshEpisodeMapping', () => {

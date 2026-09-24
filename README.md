@@ -10,6 +10,9 @@ on your own hardware -- no cloud services required.
 
 - Docker and Docker Compose
 - A [Jimaku](https://jimaku.cc) account and API key (Account -> API Key)
+- An [OpenSubtitles](https://www.opensubtitles.com) account and API key
+  (Settings -> API), used as a third subtitle source alongside Jimaku and
+  AnimeTosho
 - The manifest URL of a Stremio stream addon that returns direct,
   already-resolved playback URLs for the content you watch (e.g. your
   personal AIOStreams instance's manifest URL, with your debrid config
@@ -28,7 +31,12 @@ Edit `.env`:
 ```
 STREAM_ADDON_URL=https://your-aiostreams-instance.example.com/your-config-token/manifest.json
 JIMAKU_API_KEY=your-jimaku-api-key
+OPENSUBTITLES_API_KEY=your-opensubtitles-api-key
 ```
+
+See `.env.example` for the full list of settings (timeouts, cache TTLs,
+OpenSubtitles' daily download quota, etc.) -- everything else has a
+working default.
 
 Then:
 
@@ -79,17 +87,20 @@ be the real extracted text.
 
 - **Manifest won't load / container won't start**: check
   `docker compose logs animesubs`. A missing or malformed
-  `STREAM_ADDON_URL`/`JIMAKU_API_KEY` fails fast at startup with a specific
-  error naming the variable.
+  `STREAM_ADDON_URL`/`JIMAKU_API_KEY`/`OPENSUBTITLES_API_KEY` fails fast at
+  startup with a specific error naming the variable.
 - **Every request returns an empty subtitle list**: the incoming content id
   probably isn't resolvable against the bundled anime dataset. This addon
-  only resolves `kitsu:`, `mal:`, `anidb:`, and `anilist:`-prefixed ids --
-  not bare IMDb (`tt...`) ids (see the design spec's ID resolver section).
-  Check what id scheme your metadata addon is actually serving for the
-  content in question.
+  resolves `kitsu:`, `mal:`, `anidb:`, and `anilist:`-prefixed ids directly,
+  and `tt...`-prefixed (IMDb) ids for anime the `anime-lists` project maps
+  to an IMDb id -- not every anime has one. Check what id scheme your
+  metadata addon is actually serving for the content in question.
 - **Tier 3 (extraction) never finds anything**: confirm
   `STREAM_ADDON_URL` actually returns a stream with a direct `url` field
   (not just `infoHash`) for that content -- test it directly:
   `curl "$(cat .env | grep STREAM_ADDON_URL | cut -d= -f2 | sed 's/manifest.json//')stream/series/kitsu:ID:1:1.json"`.
 - **Jimaku requests fail with 401**: your `JIMAKU_API_KEY` is wrong or
   expired -- regenerate it from your Jimaku account page.
+- **OpenSubtitles requests fail with 401/403, or never seem to run**: your
+  `OPENSUBTITLES_API_KEY` is wrong, or you've hit `OPENSUBTITLES_DAILY_QUOTA`
+  for the day -- it resets on a rolling 24h window from first use.

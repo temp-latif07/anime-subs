@@ -177,6 +177,10 @@ export class EpisodeMapping {
       mapping_rules: string;
     }[];
 
+    // Pass 1: an explicit/range rule match takes priority over any row's
+    // default-season fallback, checked across every row before falling
+    // through -- a later row's explicit rule must not be shadowed by an
+    // earlier row's default-season match (finding I2).
     for (const row of rows) {
       const rules = JSON.parse(row.mapping_rules) as MappingRule[];
       for (const rule of rules) {
@@ -190,12 +194,26 @@ export class EpisodeMapping {
         });
         if (range) return { anidbId: row.anidb_id, anidbEpisode: tvdbEpisode - range.offset };
       }
-      if (rules.length === 0 && row.default_tvdb_season === tvdbSeason) {
-        const offset = row.episode_offset ?? 0;
-        return { anidbId: row.anidb_id, anidbEpisode: tvdbEpisode - offset };
+    }
+
+    // Pass 2: default-season fallback, mirroring mapAnidbToTvdbEpisode's
+    // unconditional fallback -- a row having rules for an unrelated season
+    // (e.g. specials) must not disable its own default-season match
+    // (finding I2). When multiple rows share a default season (split-cour),
+    // the row whose offset places tvdbEpisode closest above it wins
+    // (finding I1) -- e.g. offset=0 covers episodes 1-12, offset=12 covers
+    // 13+, so episode 13 must resolve against the offset=12 row, not
+    // whichever row happens to come first in the table.
+    let best: { anidbId: number; anidbEpisode: number; offset: number } | null = null;
+    for (const row of rows) {
+      if (row.default_tvdb_season !== tvdbSeason) continue;
+      const offset = row.episode_offset ?? 0;
+      if (offset >= tvdbEpisode) continue;
+      if (best === null || offset > best.offset) {
+        best = { anidbId: row.anidb_id, anidbEpisode: tvdbEpisode - offset, offset };
       }
     }
-    return null;
+    return best ? { anidbId: best.anidbId, anidbEpisode: best.anidbEpisode } : null;
   }
 }
 

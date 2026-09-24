@@ -49,18 +49,18 @@ function runProvider(
   if (provider === 'jimaku') {
     return deps
       .jimakuProvider(baseKey.anilistId, baseKey.episode, baseKey.lang, deps.config.jimakuApiKey, { timeoutMs: deps.config.providerTimeoutMs })
-      .catch((err) => { console.warn(`[Jimaku] ${(err as Error).message}`); return { found: false } as ProviderResult; });
+      .catch((err) => { console.warn(`[Jimaku] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
   }
   if (provider === 'animetosho') {
     return deps
       .animetoshoProvider(anidbId, baseKey.episode, baseKey.lang, { timeoutMs: deps.config.providerTimeoutMs, title })
-      .catch((err) => { console.warn(`[AnimeTosho] ${(err as Error).message}`); return { found: false } as ProviderResult; });
+      .catch((err) => { console.warn(`[AnimeTosho] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
   }
   const tvdb = anidbId !== null ? deps.episodeMapping.mapAnidbToTvdbEpisode(anidbId, baseKey.episode) : null;
   const hasQuota = deps.cache.getRemainingQuota('opensubtitles', deps.config.openSubtitlesDailyQuota) > 0;
   return deps
     .opensubtitlesProvider(imdbId, tvdb?.season ?? null, tvdb?.episode ?? null, baseKey.lang, deps.config.openSubtitlesApiKey, { timeoutMs: deps.config.providerTimeoutMs, hasQuota })
-    .catch((err) => { console.warn(`[OpenSubtitles] ${(err as Error).message}`); return { found: false } as ProviderResult; });
+    .catch((err) => { console.warn(`[OpenSubtitles] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
 }
 
 async function tryDatabaseTier(
@@ -81,9 +81,11 @@ async function tryDatabaseTier(
 
     try {
       const result = await job;
+      if (!existing && provider === 'opensubtitles' && result.downloadAttempted) {
+        deps.cache.recordDownloadUsed('opensubtitles');
+      }
       if (result.found && result.vttContent) {
         deps.cache.setReady(key, result.vttContent);
-        if (!existing && provider === 'opensubtitles') deps.cache.recordDownloadUsed('opensubtitles');
         hits.push(provider);
         return;
       }
@@ -91,7 +93,7 @@ async function tryDatabaseTier(
         const seriesId = provider === 'jimaku' ? baseKey.anilistId : anidbId;
         if (seriesId !== null) deps.cache.setSeriesProviderMiss(provider, seriesId);
       }
-      if (!result.quotaSkipped) deps.cache.setNegative(key);
+      if (!result.quotaSkipped && !result.transient) deps.cache.setNegative(key);
     } finally {
       if (!existing) deps.cache.clearInFlight(key);
     }
@@ -104,7 +106,7 @@ async function resolveOneLanguage(
   baseKey: { anilistId: number; episode: number; lang: string },
   anidbId: number | null,
   imdbId: string | null,
-  parsed: ParsedSubtitleRequestId & { episode: number },
+  originalParsed: ParsedSubtitleRequestId,
   deps: SubtitlesHandlerDeps,
   mediaType: string | undefined,
   title: string | null,
@@ -143,35 +145,35 @@ async function resolveOneLanguage(
 
   const streamUrlsPromise = getPlayableStreamUrls(
     deps.config.streamAddonUrl,
-    parsed.contentId,
-    parsed.season,
-    parsed.episode,
+    originalParsed.contentId,
+    originalParsed.season,
+    originalParsed.episode,
     { timeoutMs: deps.config.providerTimeoutMs, mediaType },
   ).catch((err) => {
     if (err instanceof HttpTimeoutError) throw err;
     return [];
   });
 
-  startExtractionInBackground(extractionKey, parsed, deps, mediaType, streamUrlsPromise);
+  startExtractionInBackground(extractionKey, originalParsed, deps, mediaType, streamUrlsPromise);
   return ['extraction'];
 }
 
 function startExtractionInBackground(
   extractionKey: CacheKey,
-  parsed: ParsedSubtitleRequestId & { episode: number },
+  originalParsed: ParsedSubtitleRequestId,
   deps: SubtitlesHandlerDeps,
   mediaType: string | undefined,
   streamUrls: Promise<string[]>,
 ): void {
   if (deps.cache.getInFlight(extractionKey)) return;
 
-  console.log(`[Tier 2: Extraction] Starting background extraction for ${parsed.contentId} ep:${parsed.episode} (${extractionKey.lang})`);
+  console.log(`[Tier 2: Extraction] Starting background extraction for ${originalParsed.contentId} ep:${originalParsed.episode} (${extractionKey.lang})`);
   deps.cache.setPending(extractionKey);
   const job = deps.extractionProvider({
     streamAddonUrl: deps.config.streamAddonUrl,
-    contentId: parsed.contentId,
-    season: parsed.season,
-    episode: parsed.episode,
+    contentId: originalParsed.contentId,
+    season: originalParsed.season,
+    episode: originalParsed.episode,
     lang: extractionKey.lang,
     queue: deps.queue,
     extractionTimeoutMs: deps.config.extractionTimeoutMs,
@@ -189,7 +191,7 @@ function startExtractionInBackground(
           console.warn(`[Tier 2: Extraction] Extraction succeeded but failed to persist: ${(err as Error).message}`);
         }
       } else {
-        console.log(`[Tier 2: Extraction] NOT FOUND for ${parsed.contentId} ep:${parsed.episode}`);
+        console.log(`[Tier 2: Extraction] NOT FOUND for ${originalParsed.contentId} ep:${originalParsed.episode}`);
         deps.cache.setNegative(extractionKey);
       }
       return result;
@@ -221,13 +223,12 @@ export async function handleSubtitlesRequest(
   }
   const anilistId = ids.anilistId;
   const episode = resolveEffectiveEpisode(parsed, ids.anidbId, deps.episodeMapping);
-  const effectiveParsed = { ...parsed, episode };
   console.log(`[AnimeSubs] Resolving subtitles for ${rawId} -> anilist:${anilistId}${ids.anidbId ? `, anidb:${ids.anidbId}` : ''}`);
 
   const results = await Promise.all(
     deps.config.subtitleLanguages.map(async (lang) => {
       const baseKey = { anilistId, episode, lang };
-      const hitProviders = await resolveOneLanguage(baseKey, ids.anidbId, ids.imdbId ?? null, effectiveParsed, deps, mediaType, ids.title ?? null);
+      const hitProviders = await resolveOneLanguage(baseKey, ids.anidbId, ids.imdbId ?? null, parsed, deps, mediaType, ids.title ?? null);
       return hitProviders.map((provider): SubtitleCandidate => ({
         lang,
         provider,

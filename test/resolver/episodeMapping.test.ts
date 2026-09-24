@@ -112,6 +112,50 @@ describe('EpisodeMapping — reverse (tvdb -> anidb) and imdbId', () => {
     expect(mapping.mapAnidbToTvdbEpisode(50, 1)).toEqual({ season: 2, episode: 13 });
     expect(mapping.mapTvdbToAnidbEpisode('8000', 2, 13)).toEqual({ anidbId: 50, anidbEpisode: 1 });
   });
+
+  it('reverses to the correct split-cour entry when two anidb entries share one tvdb season, disambiguated by offset', () => {
+    const splitCourXml = `<?xml version="1.0" encoding="utf-8"?>
+<anime-list>
+  <anime anidbid="100" tvdbid="9000" defaulttvdbseason="3">
+    <name>Show Part 1</name>
+  </anime>
+  <anime anidbid="200" tvdbid="9000" defaulttvdbseason="3" episodeoffset="12">
+    <name>Show Part 2</name>
+  </anime>
+</anime-list>`;
+    const mapping = EpisodeMapping.buildFromXml(splitCourXml, new Database(':memory:'));
+    expect(mapping.mapTvdbToAnidbEpisode('9000', 3, 5)).toEqual({ anidbId: 100, anidbEpisode: 5 });
+    expect(mapping.mapTvdbToAnidbEpisode('9000', 3, 13)).toEqual({ anidbId: 200, anidbEpisode: 1 });
+  });
+
+  it('reverses split-cour entries the same way regardless of row insertion order', () => {
+    const splitCourXmlReversed = `<?xml version="1.0" encoding="utf-8"?>
+<anime-list>
+  <anime anidbid="200" tvdbid="9001" defaulttvdbseason="3" episodeoffset="12">
+    <name>Show Part 2</name>
+  </anime>
+  <anime anidbid="100" tvdbid="9001" defaulttvdbseason="3">
+    <name>Show Part 1</name>
+  </anime>
+</anime-list>`;
+    const mapping = EpisodeMapping.buildFromXml(splitCourXmlReversed, new Database(':memory:'));
+    expect(mapping.mapTvdbToAnidbEpisode('9001', 3, 5)).toEqual({ anidbId: 100, anidbEpisode: 5 });
+    expect(mapping.mapTvdbToAnidbEpisode('9001', 3, 13)).toEqual({ anidbId: 200, anidbEpisode: 1 });
+  });
+
+  it('still falls back to the default season when the only mapping-list rule is for a different (specials) season', () => {
+    const specialsPlusDefaultXml = `<?xml version="1.0" encoding="utf-8"?>
+<anime-list>
+  <anime anidbid="300" tvdbid="9500" defaulttvdbseason="1">
+    <name>Show With A Special</name>
+    <mapping-list>
+      <mapping anidbseason="0" tvdbseason="0">;99-1;</mapping>
+    </mapping-list>
+  </anime>
+</anime-list>`;
+    const mapping = EpisodeMapping.buildFromXml(specialsPlusDefaultXml, new Database(':memory:'));
+    expect(mapping.mapTvdbToAnidbEpisode('9500', 1, 3)).toEqual({ anidbId: 300, anidbEpisode: 3 });
+  });
 });
 
 describe('downloadEpisodeMapping', () => {

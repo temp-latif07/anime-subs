@@ -73,16 +73,29 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('does not double-charge the OpenSubtitles quota or double-call a provider for two concurrent requests of the same episode', async () => {
-    let callCount = 0;
+    let jimakuCallCount = 0;
+    let osCallCount = 0;
     deps.jimakuProvider = vi.fn(() => {
-      callCount++;
+      jimakuCallCount++;
       return new Promise<ProviderResult>((resolve) => setTimeout(() => resolve({ found: true, vttContent: 'WEBVTT\n\n1\nx' }), 20));
+    });
+    deps.opensubtitlesProvider = vi.fn(() => {
+      osCallCount++;
+      return new Promise<ProviderResult>((resolve) => setTimeout(() => resolve({ found: true, vttContent: 'WEBVTT\n\n1\nos', downloadAttempted: true }), 20));
     });
     await Promise.all([
       handleSubtitlesRequest('kitsu:46474:1:5', deps),
       handleSubtitlesRequest('kitsu:46474:1:5', deps),
     ]);
-    expect(callCount).toBe(1);
+    expect(jimakuCallCount).toBe(1);
+    expect(osCallCount).toBe(1);
+    expect(cache.getRemainingQuota('opensubtitles', deps.config.openSubtitlesDailyQuota)).toBe(deps.config.openSubtitlesDailyQuota - 1);
+  });
+
+  it('records OpenSubtitles quota usage whenever a download was attempted, even if the file is rejected afterward as low quality', async () => {
+    deps.opensubtitlesProvider = vi.fn(async () => ({ found: false, downloadAttempted: true }));
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(cache.getRemainingQuota('opensubtitles', deps.config.openSubtitlesDailyQuota)).toBe(deps.config.openSubtitlesDailyQuota - 1);
   });
 
   it('does not set the negative cache for OpenSubtitles when the result is quota-skipped', async () => {
@@ -97,6 +110,20 @@ describe('handleSubtitlesRequest', () => {
     await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' as const };
     expect(cache.get(key)?.status).toBe('negative');
+  });
+
+  it('does not negative-cache a Tier-1 provider miss caused by a thrown error, unlike a genuine found:false miss', async () => {
+    deps.jimakuProvider = vi.fn(async () => { throw new Error('jimaku 503 Service Unavailable'); });
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' as const };
+    expect(cache.get(key)).toBeNull(); // not negative -- must remain retryable, this was never a real miss
+  });
+
+  it('does not negative-cache OpenSubtitles when the provider throws (e.g. a transient HTTP error)', async () => {
+    deps.opensubtitlesProvider = vi.fn(async () => { throw new Error('opensubtitles 500 Internal Server Error'); });
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' as const };
+    expect(cache.get(key)).toBeNull();
   });
 
   it('does not negative-cache the extraction key when cache.setReady throws after a successful extraction', async () => {
@@ -151,6 +178,45 @@ describe('handleSubtitlesRequest', () => {
         url: 'https://addon.example.com/vtt/2001/3/eng/jimaku.vtt',
       },
     ]);
+  });
+
+  it('passes the original tt-prefixed season/episode (not the anidb-relative one) to the extraction provider when Tier 1 misses', async () => {
+    const ttXml = `<?xml version="1.0" encoding="utf-8"?>
+<anime-list>
+  <anime anidbid="1001" tvdbid="5000" defaulttvdbseason="2" episodeoffset="12" imdbid="tt9999999">
+    <name>Show S2</name>
+  </anime>
+</anime-list>`;
+    const localMapping = EpisodeMapping.buildFromXml(ttXml, new Database(':memory:'));
+    const localDataset = AnimeDataset.buildFromRaw({
+      data: [{ sources: ['https://anidb.net/anime/1001', 'https://anilist.co/anime/2001'] }],
+    }, new Database(':memory:'), localMapping);
+
+    let passedParams: ExtractionParams | null = null;
+    const localDeps: SubtitlesHandlerDeps = {
+      ...deps,
+      dataset: { current: localDataset },
+      episodeMapping: localMapping,
+      extractionProvider: vi.fn(async (params) => {
+        passedParams = params;
+        return { found: false };
+      }),
+    };
+
+    // tt9999999:2:15 -> anidb-relative episode 15-12=3 (used for the cache key
+    // and Tier 1), but the stream addon still numbers this video tt9999999 S2E15.
+    await handleSubtitlesRequest('tt9999999:2:15', localDeps);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(passedParams).not.toBeNull();
+    expect(passedParams!.contentId).toBe('tt9999999');
+    expect(passedParams!.season).toBe(2);
+    expect(passedParams!.episode).toBe(15);
+
+    // the cache key itself must still use the anidb-relative episode, so it's
+    // shared correctly with kitsu/anilist-numbered requests for the same episode.
+    const key = { anilistId: 2001, episode: 3, lang: 'eng', provider: 'extraction' as const };
+    expect(cache.get(key)).not.toBeNull();
   });
 
   it('returns an empty list for an unresolvable content id', async () => {

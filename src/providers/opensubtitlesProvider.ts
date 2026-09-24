@@ -41,8 +41,12 @@ export async function findOpenSubtitlesSubtitle(
     'Content-Type': 'application/json',
   };
 
+  // anime-lists' imdbid attribute is the series-level id, and the OpenSubtitles
+  // API requires that as parent_imdb_id (paired with season/episode_number) --
+  // imdb_id alone means the individual episode's own imdb id, which anime-lists
+  // never provides.
   const numericImdbId = imdbId.replace(/^tt/, '');
-  const searchUrl = `${baseUrl}/subtitles?imdb_id=${numericImdbId}&season_number=${tvdbSeason}&episode_number=${tvdbEpisode}&languages=${osLang}`;
+  const searchUrl = `${baseUrl}/subtitles?parent_imdb_id=${numericImdbId}&season_number=${tvdbSeason}&episode_number=${tvdbEpisode}&languages=${osLang}`;
   const search = await fetchJson<OpenSubtitlesSearchResponse>(searchUrl, { headers, timeoutMs });
 
   const fileId = search.data[0]?.attributes.files[0]?.file_id;
@@ -57,8 +61,16 @@ export async function findOpenSubtitlesSubtitle(
     timeoutMs,
   });
 
-  const raw = await fetchBuffer(download.link, { timeoutMs });
-  const vttContent = await convertToVtt(raw, 'srt', lang);
-  if (!isAcceptableSubtitle(vttContent, lang)) return { found: false };
-  return { found: true, vttContent };
+  // The server has now spent one quota unit for this download, regardless of
+  // whether the steps below succeed -- downloadAttempted must be reported
+  // even if they fail, so the caller's local quota counter doesn't drift.
+  try {
+    const raw = await fetchBuffer(download.link, { timeoutMs });
+    const vttContent = await convertToVtt(raw, 'srt', lang);
+    if (!isAcceptableSubtitle(vttContent, lang)) return { found: false, downloadAttempted: true };
+    return { found: true, vttContent, downloadAttempted: true };
+  } catch (err) {
+    console.warn(`[OpenSubtitles] Download succeeded but post-processing failed: ${(err as Error).message}`);
+    return { found: false, downloadAttempted: true, transient: true };
+  }
 }

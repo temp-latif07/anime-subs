@@ -1,12 +1,13 @@
 import { JAPANESE_CHAR_REGEX } from './assUtils.js';
-import { resolveLinePosition } from './subtitleFormatting.js';
+import { resolveLinePosition, wrapSubtitleText } from './subtitleFormatting.js';
 
 function finalizeCue(
   timing: string,
   rawTextLines: string[],
   targetLang = 'eng',
 ): { timing: string; textLines: string[] } | null {
-  let isTop = false;
+  let isTop = timing.includes('line:10%');
+  const isSignOrPositionedCue = timing.includes('position:') || (timing.includes('line:') && !timing.includes('line:90%,end'));
   const processedLines: string[] = [];
 
   const linesToProcess =
@@ -21,16 +22,21 @@ function finalizeCue(
       line = line.replace(/\{[^}]*\\?an[789][^}]*\}/gi, '');
     }
 
-
     // Strip remaining residual {...}
     line = line.replace(/\{[^}]*\}/g, '').trim();
-    if (line) processedLines.push(line);
+    if (line) {
+      if (!isTop && !isSignOrPositionedCue) {
+        processedLines.push(...wrapSubtitleText(line).split('\n'));
+      } else {
+        processedLines.push(line);
+      }
+    }
   }
 
   if (processedLines.length === 0) return null;
 
   let finalTiming = timing;
-  if (!finalTiming.includes('line:')) {
+  if (!finalTiming.includes('line:') && !finalTiming.includes('position:')) {
     finalTiming += ` ${resolveLinePosition(isTop)}`;
   }
 

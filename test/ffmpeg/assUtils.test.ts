@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { convertAssToVtt } from '../../src/ffmpeg/assUtils.js';
+import { normalizeVtt } from '../../src/ffmpeg/vttUtils.js';
 
 describe('convertAssToVtt', () => {
   it('converts basic dialogue with normalized timestamps and sequential cue numbers', () => {
@@ -227,5 +228,21 @@ Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,First part {\\r}Second part
 `;
     const vtt = convertAssToVtt(ass);
     expect(vtt).toContain('First part Second part');
+  });
+
+  it('automatically wraps long dialogue lines into balanced multi-line cues but preserves signs with \\pos', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,I was thinking that we might find something that could help.
+Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\pos(100,50)}I was thinking that we might find something that could help.
+`;
+    const vtt = convertAssToVtt(ass);
+    expect(vtt).toContain('I was thinking that we might\nfind something that could help.');
+    expect(vtt).toContain('position:26% line:17% align:center\nI was thinking that we might find something that could help.');
+
+    // End-to-end pipeline: normalizeVtt downstream must keep the sign unwrapped and positioned
+    const normalized = normalizeVtt(vtt);
+    expect(normalized).toContain('position:26% line:17% align:center\nI was thinking that we might find something that could help.');
+    expect(normalized).not.toContain('position:26% line:17% align:center\nI was thinking that we might\nfind');
   });
 });

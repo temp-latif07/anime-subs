@@ -54,7 +54,7 @@ describe('normalizeVtt', () => {
   it('preserves words with ca, ci, ac, ce, cc letter combinations without corruption', () => {
     const raw = 'WEBVTT\n\n00:01.000 --> 00:03.000\nBecause of the accident, I decided to practice and dance in the cinema with a cat.\n';
     const normalized = normalizeVtt(raw);
-    expect(normalized).toContain('Because of the accident, I decided to practice and dance in the cinema with a cat.');
+    expect(normalized).toContain('Because of the accident, I decided to\npractice and dance in the cinema with a\ncat.');
   });
 
   it('does not add speaker dashes based on differing colors alone', () => {
@@ -109,6 +109,25 @@ Goodbye!
     expect(result).toContain('Goodbye!');
     const cues = result.trim().split('\n\n').slice(1);
     expect(cues.length).toBe(2);
+  });
+
+  it('automatically wraps long bottom dialogue lines in normalizeVtt', () => {
+    const input = `WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nI was thinking that we might find something that could help.\n`;
+    const result = normalizeVtt(input, 'eng');
+    expect(result).toContain('I was thinking that we might\nfind something that could help.');
+  });
+
+  it('does not wrap sign or positioned cues in normalizeVtt', () => {
+    const input = `WEBVTT\n\n1\n00:00:04.000 --> 00:00:06.000 position:26% line:17% align:center\nI was thinking that we might find something that could help.\n`;
+    const result = normalizeVtt(input, 'eng');
+    expect(result).toContain('position:26% line:17% align:center\nI was thinking that we might find something that could help.');
+    expect(result).not.toContain('I was thinking that we might\nfind');
+  });
+
+  it('preserves top-aligned line:10% cues without wrapping in normalizeVtt', () => {
+    const input = `WEBVTT\n\n1\n00:00:04.000 --> 00:00:06.000 line:10%\nI was thinking that we might find something that could help.\n`;
+    const result = normalizeVtt(input, 'eng');
+    expect(result).toContain('line:10%\nI was thinking that we might find something that could help.');
   });
 });
 

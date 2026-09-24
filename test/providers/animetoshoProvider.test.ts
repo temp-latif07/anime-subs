@@ -92,6 +92,11 @@ describe('findAnimeToshoSubtitle', () => {
             { id: 62, title: '[Group] Show - 03 [1080p].mkv', status: 'complete', num_files: 1 },
             { id: 63, title: '[Group] Show - 04 [1080p].mkv', status: 'complete', num_files: 1 },
           ]));
+        } else if (aid === '79999') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 70, title: '[Group] XyzShow - 08 [1080p].mkv', status: 'complete', num_files: 1 },
+          ]));
         } else if (!aid && q && (q.startsWith('Fallback Show') || q.startsWith('Fallback  Show'))) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify([
@@ -248,6 +253,19 @@ describe('findAnimeToshoSubtitle', () => {
             ],
           }],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '70') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 70,
+          title: '[Group] XyzShow - 08 [1080p].mkv',
+          attachments: [
+            { id: 7001, info: { language: 'English (Signs & Songs)', language_code: 'eng', format: 'ASS', default: false, forced: false }, size: 5000, url: '/direct/download/7001.xz' },
+            { id: 7002, info: { language: 'English', language_code: 'eng', format: 'ASS', default: true, forced: false }, size: 35000, url: '/direct/download/7002.xz' },
+          ],
+        }));
+      } else if (url.pathname === '/direct/download/7002.xz') {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedAssSubtitle);
       } else if (url.pathname === expectedAssPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
@@ -452,6 +470,15 @@ describe('findAnimeToshoSubtitle', () => {
     expect(result.found).toBe(false);
   });
 
+  it('resolves subtitles from animetosho.xyz top-level attachments and direct URLs', async () => {
+    const result = await findAnimeToshoSubtitle(79999, 8, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
+  });
+
   it('correctly parses various episode numbering conventions with parseEpisodeNumber', () => {
     expect(parseEpisodeNumber('[Group] Show 06 [1080p].mkv')).toBe(6);
     expect(parseEpisodeNumber('Show Episode 06.mkv')).toBe(6);
@@ -493,6 +520,11 @@ describe('isForcedOrSignsAttachment', () => {
   it('returns true when name contains song or songs', () => {
     expect(isForcedOrSignsAttachment({ name: 'Songs only' })).toBe(true);
     expect(isForcedOrSignsAttachment({ name: 'Song' })).toBe(true);
+  });
+
+  it('returns true when language field contains signs, songs, or forced', () => {
+    expect(isForcedOrSignsAttachment({ language: 'English (Signs & Songs)' })).toBe(true);
+    expect(isForcedOrSignsAttachment({ language: 'Forced English' })).toBe(true);
   });
 });
 

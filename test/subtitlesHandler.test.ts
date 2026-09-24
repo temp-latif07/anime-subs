@@ -329,6 +329,14 @@ describe('handleSubtitlesRequest', () => {
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'animetosho', url: 'https://addon.example.com/vtt/154587/5/eng/animetosho.vtt' }]);
     expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' })?.status).toBe('ready');
+    expect(deps.animetoshoProvider).toHaveBeenCalledWith(
+      17617,
+      5,
+      'eng',
+      expect.objectContaining({
+        timeoutMs: deps.config.providerTimeoutMs,
+      }),
+    );
   });
 
   it('sets negative cache when extraction provider resolves with found: false', async () => {

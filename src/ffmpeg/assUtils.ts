@@ -1,5 +1,5 @@
 import { compile } from 'ass-compiler';
-import { resolvePosition } from './subtitleFormatting.js';
+import { resolvePosition, wrapSubtitleText } from './subtitleFormatting.js';
 
 export const JAPANESE_CHAR_REGEX = /[぀-ゟ゠-ヿ一-鿿㐀-䶿]/;
 
@@ -65,8 +65,11 @@ export function convertAssToVtt(ass: string, targetLang?: string): string {
   const cuesContent: string[] = [];
   let index = 1;
   for (const dialogue of compiled.dialogues as CompiledDialogue[]) {
-    const text = buildCueText(dialogue, targetLang);
-    if (!text) continue;
+    const rawText = buildCueText(dialogue, targetLang);
+    if (!rawText) continue;
+    const isSign = Boolean(dialogue.pos);
+    const isTop = dialogue.alignment >= 7 && dialogue.alignment <= 9;
+    const text = isSign || isTop ? rawText : wrapSubtitleText(rawText);
     const settings = resolvePosition(dialogue.alignment, dialogue.pos, compiled.width, compiled.height);
     const start = formatVttTime(dialogue.start);
     const end = formatVttTime(dialogue.end);

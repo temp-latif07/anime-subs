@@ -21,7 +21,7 @@ export interface SubtitlesHandlerDeps {
   config: Config;
   buildSubtitleUrl: (key: CacheKey) => string;
   jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>;
-  animetoshoProvider: (anidbId: number | null, episode: number, lang: string, opts?: { timeoutMs?: number; title?: string | null }) => Promise<ProviderResult>;
+  animetoshoProvider: (anidbId: number | null, episode: number, lang: string, opts?: { timeoutMs?: number; title?: string | null; feedBaseUrl?: string; storageBaseUrl?: string }) => Promise<ProviderResult>;
   opensubtitlesProvider: (imdbId: string | null, tvdbSeason: number | null, tvdbEpisode: number | null, lang: string, apiKey: string, opts?: { timeoutMs?: number; hasQuota?: boolean }) => Promise<ProviderResult>;
   extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>;
 }
@@ -53,7 +53,10 @@ function runProvider(
   }
   if (provider === 'animetosho') {
     return deps
-      .animetoshoProvider(anidbId, baseKey.episode, baseKey.lang, { timeoutMs: deps.config.providerTimeoutMs, title })
+      .animetoshoProvider(anidbId, baseKey.episode, baseKey.lang, {
+        timeoutMs: deps.config.providerTimeoutMs,
+        title,
+      })
       .catch((err) => { console.warn(`[AnimeTosho] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
   }
   const tvdb = anidbId !== null ? deps.episodeMapping.mapAnidbToTvdbEpisode(anidbId, baseKey.episode) : null;

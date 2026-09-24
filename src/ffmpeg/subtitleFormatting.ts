@@ -27,3 +27,73 @@ export function resolvePosition(
   const y = Math.round((pos.y / height) * 100);
   return `position:${x}% line:${y}% align:${horizontal}`;
 }
+
+function visibleLength(str: string): number {
+  return str.replace(/<[^>]+>/g, '').length;
+}
+
+function wrapSingleLine(line: string, maxLineLength: number): string {
+  if (visibleLength(line) <= maxLineLength) return line;
+
+  const words = line.split(' ');
+  if (words.length <= 1) return line;
+
+  const totalVis = visibleLength(line);
+  if (totalVis <= maxLineLength * 2) {
+    const mid = Math.floor(totalVis / 2);
+    let bestWordIdx = -1;
+    let minDistance = Infinity;
+
+    let currentVis = 0;
+    for (let i = 0; i < words.length - 1; i++) {
+      currentVis += visibleLength(words[i]);
+      const firstLineVis = currentVis;
+      const secondLineVis = totalVis - currentVis - 1;
+      if (firstLineVis <= maxLineLength && secondLineVis <= maxLineLength) {
+        const dist = Math.abs(currentVis - mid);
+        if (dist < minDistance) {
+          minDistance = dist;
+          bestWordIdx = i;
+        }
+      }
+      currentVis += 1;
+    }
+
+    if (bestWordIdx !== -1) {
+      const line1 = words.slice(0, bestWordIdx + 1).join(' ');
+      const line2 = words.slice(bestWordIdx + 1).join(' ');
+      return `${line1}\n${line2}`;
+    }
+  }
+
+  const lines: string[] = [];
+  let currentWords: string[] = [];
+  let currentLen = 0;
+
+  for (const word of words) {
+    const wLen = visibleLength(word);
+    if (currentWords.length === 0) {
+      currentWords.push(word);
+      currentLen = wLen;
+    } else if (currentLen + 1 + wLen <= maxLineLength) {
+      currentWords.push(word);
+      currentLen += 1 + wLen;
+    } else {
+      lines.push(currentWords.join(' '));
+      currentWords = [word];
+      currentLen = wLen;
+    }
+  }
+  if (currentWords.length > 0) {
+    lines.push(currentWords.join(' '));
+  }
+
+  return lines.join('\n');
+}
+
+export function wrapSubtitleText(text: string, maxLineLength = 42): string {
+  return text
+    .split('\n')
+    .map((line) => wrapSingleLine(line, maxLineLength))
+    .join('\n');
+}

@@ -48,17 +48,47 @@ function tryLoadExistingTable(db: Database.Database): AnimeDataset | null {
   }
 }
 
+export interface ShutdownDependencies {
+  server: { close: (callback?: (err?: Error) => void) => void };
+  cache?: { close: () => void };
+  datasetDb?: Database.Database;
+  refreshInterval?: NodeJS.Timeout;
+  exit?: (code: number) => void;
+}
+
+export function createShutdownHandler(deps: ShutdownDependencies): (signal: string) => void {
+  let isShuttingDown = false;
+  return (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[AnimeSubs] Received ${signal}, shutting down`);
+    if (deps.refreshInterval) {
+      clearInterval(deps.refreshInterval);
+    }
+    deps.server.close(() => {
+      deps.cache?.close();
+      deps.datasetDb?.close();
+      (deps.exit ?? process.exit)(0);
+    });
+  };
+}
+
 async function main() {
   const config = loadConfig();
   mkdirSync(config.dataDir, { recursive: true });
 
   const datasetDb = new Database(join(config.dataDir, 'anime-dataset.db'));
   const datasetHolder: DatasetHolder = { current: await loadOrRefreshDataset(datasetDb) };
-  setInterval(async () => {
+  const refreshInterval = setInterval(async () => {
     datasetHolder.current = await loadOrRefreshDataset(datasetDb, datasetHolder.current);
   }, DATASET_REFRESH_INTERVAL_MS);
 
   const cache = new CacheStore(join(config.dataDir, 'cache.db'), join(config.dataDir, 'subtitles'));
+  const reconciled = cache.reconcilePendingOnStartup();
+  if (reconciled > 0) {
+    console.log(`[AnimeSubs] Cleared ${reconciled} stale pending cache row(s) from a previous run`);
+  }
+
   const queue = new ExtractionQueue(config.extractionConcurrency);
 
   const app = createServer({
@@ -72,10 +102,20 @@ async function main() {
     extractionProvider: runExtractionTier,
   }, cache);
 
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`AnimeSubs listening on port ${config.port}`);
   });
+
+  const shutdown = createShutdownHandler({
+    server,
+    cache,
+    datasetDb,
+    refreshInterval,
+  });
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
+
 
 const isDirectRun = process.argv[1] && (() => {
   try {

@@ -101,7 +101,17 @@ export class CacheStore {
     return Date.now() - row.updated_at <= ttlHours * 60 * 60 * 1000;
   }
 
+  reconcilePendingOnStartup(): number {
+    const result = this.db.prepare("DELETE FROM cache WHERE status = 'pending'").run();
+    return result.changes;
+  }
+
+  recoverPendingRows(): number {
+    return this.reconcilePendingOnStartup();
+  }
+
   close(): void {
     this.db.close();
   }
 }
+

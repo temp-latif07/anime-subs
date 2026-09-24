@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { AnimeDataset } from '../src/resolver/animeDataset.js';
-import { loadOrRefreshDataset } from '../src/index.js';
+import { loadOrRefreshDataset, createShutdownHandler } from '../src/index.js';
 
 describe('loadOrRefreshDataset', () => {
   it('falls back to an existing on-disk anime_ids table when the download fails and no previous in-memory dataset exists', async () => {
@@ -37,3 +37,79 @@ describe('loadOrRefreshDataset', () => {
     await expect(loadOrRefreshDataset(db, undefined, 'http://127.0.0.1:1/unreachable')).rejects.toThrow();
   });
 });
+
+describe('createShutdownHandler', () => {
+  it('clears interval, closes server, closes databases, and exits 0 on signal', () => {
+    let intervalCleared = false;
+    const interval = setInterval(() => {}, 100000);
+    const origClearInterval = globalThis.clearInterval;
+    globalThis.clearInterval = ((timer: any) => {
+      if (timer === interval) intervalCleared = true;
+      origClearInterval(timer);
+    }) as any;
+
+    let serverClosed = false;
+    let cacheClosed = false;
+    let dbClosed = false;
+    let exitCode: number | null = null;
+
+    const mockServer = {
+      close: (cb?: () => void) => {
+        serverClosed = true;
+        if (cb) cb();
+      },
+    };
+    const mockCache = {
+      close: () => {
+        cacheClosed = true;
+      },
+    };
+    const mockDb = {
+      close: () => {
+        dbClosed = true;
+      },
+    } as any;
+
+    try {
+      const shutdown = createShutdownHandler({
+        server: mockServer,
+        cache: mockCache as any,
+        datasetDb: mockDb,
+        refreshInterval: interval,
+        exit: (code) => {
+          exitCode = code;
+        },
+      });
+
+      shutdown('SIGTERM');
+
+      expect(intervalCleared).toBe(true);
+      expect(serverClosed).toBe(true);
+      expect(cacheClosed).toBe(true);
+      expect(dbClosed).toBe(true);
+      expect(exitCode).toBe(0);
+    } finally {
+      globalThis.clearInterval = origClearInterval;
+      clearInterval(interval);
+    }
+  });
+
+  it('ignores subsequent signals once shutdown has started', () => {
+    let serverCloseCount = 0;
+    const mockServer = {
+      close: (cb?: () => void) => {
+        serverCloseCount++;
+        if (cb) cb();
+      },
+    };
+    const shutdown = createShutdownHandler({
+      server: mockServer,
+      exit: () => {},
+    });
+
+    shutdown('SIGINT');
+    shutdown('SIGINT');
+    expect(serverCloseCount).toBe(1);
+  });
+});
+

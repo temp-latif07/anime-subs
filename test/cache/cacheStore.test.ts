@@ -83,4 +83,30 @@ describe('CacheStore', () => {
     expect(store.hasSeriesProviderMiss('animetosho', 154587, 24)).toBe(false);
     expect(store.hasSeriesProviderMiss('jimaku', 999999, 24)).toBe(false);
   });
+
+  it('reconciles stale pending rows left over from a process restart back to a clean (absent) state', () => {
+    store.setPending(key);
+    // Simulate a restart: inFlight Map is empty (fresh CacheStore instance),
+    // but the DB row is still 'pending'.
+    const reconciled = store.reconcilePendingOnStartup();
+    expect(reconciled).toBe(1);
+    expect(store.get(key)).toBeNull();
+  });
+
+  it('does not touch ready or negative rows during pending reconciliation', () => {
+    store.setReady(key, 1, 'WEBVTT\n\n1\nhi');
+    const otherKey = { ...key, episode: 11 };
+    store.setNegative(otherKey);
+    store.reconcilePendingOnStartup();
+    expect(store.get(key)?.status).toBe('ready');
+    expect(store.get(otherKey)?.status).toBe('negative');
+  });
+
+  it('provides recoverPendingRows as an alias for reconcilePendingOnStartup', () => {
+    store.setPending(key);
+    const recovered = store.recoverPendingRows();
+    expect(recovered).toBe(1);
+    expect(store.get(key)).toBeNull();
+  });
 });
+

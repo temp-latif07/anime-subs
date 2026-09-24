@@ -14,7 +14,8 @@ describe('loadConfig', () => {
     expect(config.dataDir).toBe('/data');
     expect(config.subtitleLanguages).toEqual(['eng']);
     expect(config.negativeCacheTtlHours).toBe(24);
-    expect(config.extractionConcurrency).toBe(1);
+    expect(config.extractionConcurrency).toBe(2);
+    expect(config.enableConcurrentExtraction).toBe(true);
     expect(config.extractionTimeoutMs).toBe(900000);
     expect(config.providerTimeoutMs).toBe(8000);
     expect(config.probeTimeoutMs).toBe(15000);
@@ -71,5 +72,17 @@ describe('loadConfig', () => {
   it('defaults vttWaitMs to 20000ms and reads VTT_WAIT_MS', () => {
     expect(loadConfig(baseEnv as NodeJS.ProcessEnv).vttWaitMs).toBe(20000);
     expect(loadConfig({ ...baseEnv, VTT_WAIT_MS: '5000' } as NodeJS.ProcessEnv).vttWaitMs).toBe(5000);
+  });
+
+  it('defaults enableConcurrentExtraction to true and parses ENABLE_CONCURRENT_EXTRACTION', () => {
+    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).enableConcurrentExtraction).toBe(true);
+    expect(loadConfig({ ...baseEnv, ENABLE_CONCURRENT_EXTRACTION: 'false' } as NodeJS.ProcessEnv).enableConcurrentExtraction).toBe(false);
+    expect(loadConfig({ ...baseEnv, ENABLE_CONCURRENT_EXTRACTION: '0' } as NodeJS.ProcessEnv).enableConcurrentExtraction).toBe(false);
+    expect(loadConfig({ ...baseEnv, ENABLE_CONCURRENT_EXTRACTION: 'true' } as NodeJS.ProcessEnv).enableConcurrentExtraction).toBe(true);
+  });
+
+  it('defaults extractionConcurrency to 2 and reads EXTRACTION_CONCURRENCY', () => {
+    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).extractionConcurrency).toBe(2);
+    expect(loadConfig({ ...baseEnv, EXTRACTION_CONCURRENCY: '4' } as NodeJS.ProcessEnv).extractionConcurrency).toBe(4);
   });
 });

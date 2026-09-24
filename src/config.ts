@@ -6,6 +6,7 @@ export interface Config {
   subtitleLanguages: string[];
   negativeCacheTtlHours: number;
   extractionConcurrency: number;
+  enableConcurrentExtraction: boolean;
   extractionTimeoutMs: number;
   providerTimeoutMs: number;
   probeTimeoutMs: number;
@@ -43,6 +44,15 @@ function requireInt(env: NodeJS.ProcessEnv, name: string, defaultValue: number):
   return parsed;
 }
 
+function requireBool(env: NodeJS.ProcessEnv, name: string, defaultValue: boolean): boolean {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const lower = raw.trim().toLowerCase();
+  if (lower === 'true' || lower === '1' || lower === 'yes') return true;
+  if (lower === 'false' || lower === '0' || lower === 'no') return false;
+  return defaultValue;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const subtitleLanguages = (env.SUBTITLE_LANGUAGES ?? 'eng').split(',').map((s) => s.trim()).filter(Boolean);
   if (subtitleLanguages.length === 0) {
@@ -56,7 +66,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     jimakuApiKey: requireEnv(env, 'JIMAKU_API_KEY'),
     subtitleLanguages,
     negativeCacheTtlHours: requireInt(env, 'NEGATIVE_CACHE_TTL_HOURS', 24),
-    extractionConcurrency: requireInt(env, 'EXTRACTION_CONCURRENCY', 1),
+    extractionConcurrency: requireInt(env, 'EXTRACTION_CONCURRENCY', 2),
+    enableConcurrentExtraction: requireBool(env, 'ENABLE_CONCURRENT_EXTRACTION', true),
     extractionTimeoutMs: requireInt(env, 'EXTRACTION_TIMEOUT_MS', 900000),
     providerTimeoutMs: requireInt(env, 'PROVIDER_TIMEOUT_MS', 8000),
     probeTimeoutMs: requireInt(env, 'PROBE_TIMEOUT_MS', 15000),

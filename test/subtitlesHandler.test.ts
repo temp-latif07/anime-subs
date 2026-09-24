@@ -33,7 +33,7 @@ const dataset = AnimeDataset.buildFromRaw({
 const baseConfig: Config = {
   port: 7000, dataDir: '/tmp', streamAddonUrl: 'https://stream.example.com/manifest.json',
   jimakuApiKey: 'key', subtitleLanguages: ['eng'], negativeCacheTtlHours: 24,
-  extractionConcurrency: 1, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
+  extractionConcurrency: 2, enableConcurrentExtraction: true, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
   openSubtitlesApiKey: 'test-key', openSubtitlesDailyQuota: 100, vttWaitMs: 500,
 };
 

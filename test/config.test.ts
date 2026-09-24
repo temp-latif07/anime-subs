@@ -4,6 +4,7 @@ import { loadConfig } from '../src/config.js';
 const baseEnv = {
   STREAM_ADDON_URL: 'https://aiostreams.example.com/abc123/manifest.json',
   JIMAKU_API_KEY: 'test-key',
+  OPENSUBTITLES_API_KEY: 'test-opensubtitles-key',
 };
 
 describe('loadConfig', () => {
@@ -54,5 +55,16 @@ describe('loadConfig', () => {
 
   it('throws when SUBTITLE_LANGUAGES is present but blank', () => {
     expect(() => loadConfig({ ...baseEnv, SUBTITLE_LANGUAGES: '' } as NodeJS.ProcessEnv)).toThrow(/SUBTITLE_LANGUAGES/);
+  });
+
+  it('requires OPENSUBTITLES_API_KEY and throws a clear error when missing', () => {
+    const env = { ...baseEnv };
+    delete (env as Record<string, string | undefined>).OPENSUBTITLES_API_KEY;
+    expect(() => loadConfig(env as NodeJS.ProcessEnv)).toThrow(/OPENSUBTITLES_API_KEY/);
+  });
+
+  it('defaults openSubtitlesDailyQuota to 5 and reads OPENSUBTITLES_DAILY_QUOTA', () => {
+    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(5);
+    expect(loadConfig({ ...baseEnv, OPENSUBTITLES_DAILY_QUOTA: '100' } as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(100);
   });
 });

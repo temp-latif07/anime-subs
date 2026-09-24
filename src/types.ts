@@ -25,6 +25,7 @@ export interface ProviderResult {
 export interface SubtitleCandidate {
   lang: string;
   url: string;
+  provider: CacheProvider;
 }
 
 export interface ResolvedIds {

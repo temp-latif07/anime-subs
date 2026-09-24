@@ -1,14 +1,16 @@
 export type CacheStatus = 'pending' | 'ready' | 'negative';
+export type CacheProvider = 'jimaku' | 'animetosho' | 'opensubtitles' | 'extraction';
 
 export interface CacheKey {
   anilistId: number;
   episode: number;
   lang: string;
+  provider: CacheProvider;
 }
 
 export interface CacheEntry {
   status: CacheStatus;
-  tier: 1 | 2 | 3 | null;
+  provider: CacheProvider | null;
   filePath: string | null;
   updatedAt: number;
 }

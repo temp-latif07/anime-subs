@@ -115,6 +115,10 @@ export class CacheStore {
     `).run(keyId(key), Date.now());
   }
 
+  delete(key: CacheKey): void {
+    this.db.prepare('DELETE FROM cache WHERE key = ?').run(keyId(key));
+  }
+
   isNegativeExpired(entry: CacheEntry, ttlHours: number): boolean {
     return Date.now() - entry.updatedAt > ttlHours * 60 * 60 * 1000;
   }

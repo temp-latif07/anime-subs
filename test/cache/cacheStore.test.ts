@@ -63,6 +63,13 @@ describe('CacheStore', () => {
     expect(entry.filePath).toBeNull();
   });
 
+  it('deletes an entry from the cache', () => {
+    store.setReady(key, 'WEBVTT\n\n1\nready to delete');
+    expect(store.get(key)).not.toBeNull();
+    store.delete(key);
+    expect(store.get(key)).toBeNull();
+  });
+
   it('tracks and clears in-flight work per key', () => {
     expect(store.getInFlight(key)).toBeUndefined();
     const promise = Promise.resolve({ found: true, vttContent: 'x' });

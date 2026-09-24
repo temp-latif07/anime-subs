@@ -129,8 +129,6 @@ async function resolveOneLanguage(
     toTry.push(provider);
   }
 
-  if (readyProviders.length > 0) return readyProviders;
-
   if (toTry.length > 0) {
     const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
     readyProviders.push(...hits);
@@ -201,10 +199,7 @@ function startExtractionInBackground(
       if (!(err instanceof HttpTimeoutError)) {
         deps.cache.setNegative(extractionKey);
       } else {
-        const rawDb = (deps.cache as unknown as { db?: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }).db;
-        if (rawDb) {
-          rawDb.prepare('DELETE FROM cache WHERE key = ?').run(`${extractionKey.anilistId}:${extractionKey.episode}:${extractionKey.lang}:${extractionKey.provider}`);
-        }
+        deps.cache.delete(extractionKey);
       }
       return { found: false } as ProviderResult;
     })

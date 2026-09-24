@@ -128,10 +128,11 @@ describe('runExtractionTier (real ffmpeg against a remote HTTP stream)', () => {
       queue: new ExtractionQueue(1),
       extractionTimeoutMs: 30000,
       providerTimeoutMs: 8000,
+      probeTimeoutMs: 5000,
     });
     expect(result.found).toBe(true);
     expect(result.vttContent).toContain('Remote extraction fixture');
-  });
+  }, 120000);
 
   it('rejects an extraction result that is predominantly Japanese instead of caching it', async () => {
     const result = await runExtractionTier({

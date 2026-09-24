@@ -65,11 +65,41 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('surfaces one subtitle track per Tier-1 provider that finds a match, not just one', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toHaveLength(2);
     expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'jimaku']);
+  });
+
+  it('initiates Tier 1 and extraction concurrently on uncached request, returning both tracks', async () => {
+    deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
+    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+
+    // Both Jimaku and Extraction should be present
+    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['extraction', 'jimaku']);
+    // Extraction provider was started
+    expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })?.status).toBe('pending');
+  });
+
+  it('does not initiate background extraction when a Tier 1 provider is already cached ready', async () => {
+    cache.setReady({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' }, 'WEBVTT\n\n1\ncached');
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['jimaku']);
+    expect(deps.extractionProvider).not.toHaveBeenCalled();
+    expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })).toBeNull();
+  });
+
+  it('preserves sequential fallback when enableConcurrentExtraction is false', async () => {
+    deps.config = { ...deps.config, enableConcurrentExtraction: false };
+    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['jimaku']);
+    expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })).toBeNull();
   });
 
   it('does not double-charge the OpenSubtitles quota or double-call a provider for two concurrent requests of the same episode', async () => {
@@ -158,6 +188,7 @@ describe('handleSubtitlesRequest', () => {
 
     const localDeps: SubtitlesHandlerDeps = {
       ...deps,
+      config: { ...baseConfig, enableConcurrentExtraction: false },
       dataset: { current: localDataset },
       episodeMapping: localMapping,
       jimakuProvider: vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nmatch' })),
@@ -224,6 +255,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('returns a tier-1 (Jimaku) hit and caches it', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'jimaku', url: 'https://addon.example.com/vtt/154587/5/eng/jimaku.vtt' }]);
@@ -231,6 +263,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('returns AnimeTosho hit when Jimaku finds nothing', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'animetosho', url: 'https://addon.example.com/vtt/154587/5/eng/animetosho.vtt' }]);
@@ -271,6 +304,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('retries providers if negative cache has expired', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' as const };
     cache.setNegative(key);
     // Artificially age the entry past 24 hours
@@ -287,6 +321,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('surfaces AnimeTosho match when Jimaku throws an error', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     deps.jimakuProvider = vi.fn(async () => {
       throw new Error('Jimaku timeout');
     });
@@ -343,7 +378,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('handles multiple configured languages', async () => {
-    deps.config = { ...baseConfig, subtitleLanguages: ['eng', 'spa'] };
+    deps.config = { ...baseConfig, subtitleLanguages: ['eng', 'spa'], enableConcurrentExtraction: false };
     deps.jimakuProvider = vi.fn(async (_anilistId, _episode, lang) => {
       if (lang === 'eng') return { found: true, vttContent: 'WEBVTT\n\n1\neng' };
       return { found: false };
@@ -416,6 +451,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('runs animetoshoProvider when anidbId is null but title is present', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho title hit' }));
     const result = await handleSubtitlesRequest('kitsu:200001:1:1', deps);
     expect(deps.animetoshoProvider).toHaveBeenCalledWith(

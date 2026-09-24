@@ -131,6 +131,62 @@ async function resolveOneLanguage(
     toTry.push(provider);
   }
 
+  const extractionKey: CacheKey = { ...baseKey, provider: 'extraction' };
+  const extractionCached = deps.cache.get(extractionKey);
+  const extractionInFlight = deps.cache.getInFlight(extractionKey);
+
+  // 1. Fast Cache Path: If any Tier 1 provider is already ready, check if extraction is also ready/pending
+  if (readyProviders.length > 0) {
+    if (toTry.length > 0) {
+      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
+      readyProviders.push(...hits);
+    }
+    if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) {
+      readyProviders.push('extraction');
+    }
+    return readyProviders;
+  }
+
+  // Helper to start extraction job
+  const triggerExtraction = (): void => {
+    const streamUrlsPromise = getPlayableStreamUrls(
+      deps.config.streamAddonUrl,
+      originalParsed.contentId,
+      originalParsed.season,
+      originalParsed.episode,
+      { timeoutMs: deps.config.providerTimeoutMs, mediaType },
+    ).catch((err) => {
+      if (err instanceof HttpTimeoutError) throw err;
+      return [];
+    });
+    startExtractionInBackground(extractionKey, originalParsed, deps, mediaType, streamUrlsPromise);
+  };
+
+  const isExtractionNegative = extractionCached?.status === 'negative' &&
+    !deps.cache.isNegativeExpired(extractionCached, deps.config.negativeCacheTtlHours);
+
+  // 2. Concurrent Branch: If enabled, kick off extraction immediately alongside Tier 1
+  if (deps.config.enableConcurrentExtraction) {
+    let extractionOffered = false;
+    if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) {
+      extractionOffered = true;
+    } else if (!isExtractionNegative) {
+      triggerExtraction();
+      extractionOffered = true;
+    }
+
+    if (toTry.length > 0) {
+      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
+      readyProviders.push(...hits);
+    }
+
+    if (extractionOffered) {
+      readyProviders.push('extraction');
+    }
+    return readyProviders;
+  }
+
+  // 3. Sequential Fallback Path (ENABLE_CONCURRENT_EXTRACTION=false)
   if (toTry.length > 0) {
     const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
     readyProviders.push(...hits);
@@ -138,23 +194,10 @@ async function resolveOneLanguage(
 
   if (readyProviders.length > 0) return readyProviders;
 
-  const extractionKey: CacheKey = { ...baseKey, provider: 'extraction' };
-  const extractionCached = deps.cache.get(extractionKey);
-  if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending') return ['extraction'];
-  if (extractionCached?.status === 'negative' && !deps.cache.isNegativeExpired(extractionCached, deps.config.negativeCacheTtlHours)) return [];
+  if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) return ['extraction'];
+  if (isExtractionNegative) return [];
 
-  const streamUrlsPromise = getPlayableStreamUrls(
-    deps.config.streamAddonUrl,
-    originalParsed.contentId,
-    originalParsed.season,
-    originalParsed.episode,
-    { timeoutMs: deps.config.providerTimeoutMs, mediaType },
-  ).catch((err) => {
-    if (err instanceof HttpTimeoutError) throw err;
-    return [];
-  });
-
-  startExtractionInBackground(extractionKey, originalParsed, deps, mediaType, streamUrlsPromise);
+  triggerExtraction();
   return ['extraction'];
 }
 

@@ -11,9 +11,10 @@ export interface BufferProbeResult {
   hasStreams: boolean;
 }
 
-interface FfprobeStream {
+export interface FfprobeStream {
   index: number;
   codec_name?: string;
+  disposition?: { forced?: number; default?: number };
   tags?: { language?: string; title?: string };
 }
 interface FfprobeOutput {
@@ -93,6 +94,12 @@ export function runCommandWithInput(
 
 const TEXT_SUBTITLE_CODECS = new Set(['ass', 'ssa', 'subrip', 'srt', 'webvtt', 'mov_text']);
 
+export function isForcedOrSignsStream(s: FfprobeStream): boolean {
+  if (s.disposition?.forced === 1) return true;
+  const title = (s.tags?.title ?? '').toLowerCase();
+  return title.includes('forced') || title.includes('sign') || title.includes('song');
+}
+
 export function parseSubtitleStreams(output: string, lang: string): FoundSubtitleStream | null {
   try {
     const parsed = JSON.parse(output) as FfprobeOutput;
@@ -100,14 +107,21 @@ export function parseSubtitleStreams(output: string, lang: string): FoundSubtitl
     const matching = streams.filter((s) => s.tags?.language === lang);
     if (matching.length === 0) return null;
 
-    const textStreams = matching.filter((s) => TEXT_SUBTITLE_CODECS.has((s.codec_name ?? '').toLowerCase()));
-    const pool = textStreams.length > 0 ? textStreams : matching;
+    const dialogueStreams = matching.filter((s) => !isForcedOrSignsStream(s));
+    if (dialogueStreams.length === 0) return null;
 
-    const dialogue = pool.find((s) => {
-      const title = (s.tags?.title ?? '').toLowerCase();
-      return !title.includes('sign') && !title.includes('song');
+    const textStreams = dialogueStreams.filter((s) =>
+      TEXT_SUBTITLE_CODECS.has((s.codec_name ?? '').toLowerCase()),
+    );
+    const pool = textStreams.length > 0 ? textStreams : dialogueStreams;
+
+    pool.sort((a, b) => {
+      const aDef = a.disposition?.default === 1 ? 1 : 0;
+      const bDef = b.disposition?.default === 1 ? 1 : 0;
+      return bDef - aDef;
     });
-    const selected = dialogue ?? pool[0];
+
+    const selected = pool[0];
     return {
       index: selected.index,
       codec: (selected.codec_name ?? 'ass').toLowerCase(),

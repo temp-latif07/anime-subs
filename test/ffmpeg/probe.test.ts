@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import {
   parseSubtitleStreams,
+  isForcedOrSignsStream,
   findSubtitleStream,
   findSubtitleStreamFromBuffer,
   findSubtitleStreamFromBufferDetailed,
@@ -72,7 +73,7 @@ describe('parseSubtitleStreams', () => {
     expect(result).toEqual({ index: 2, codec: 'ass' });
   });
 
-  it('falls back to first text stream if all text streams are sign/song titled', () => {
+  it('rejects sign/song text stream and chooses full dialogue stream even if bitmap', () => {
     const output = JSON.stringify({
       streams: [
         { index: 1, codec_name: 'subrip', tags: { language: 'eng', title: 'Songs & Signs' } },
@@ -80,7 +81,51 @@ describe('parseSubtitleStreams', () => {
       ],
     });
     const result = parseSubtitleStreams(output, 'eng');
-    expect(result).toEqual({ index: 1, codec: 'subrip' });
+    expect(result).toEqual({ index: 2, codec: 'hdmv_pgs_subtitle' });
+  });
+
+  it('ignores streams with disposition: { forced: 1 } in favor of full dialogue stream', () => {
+    const output = JSON.stringify({
+      streams: [
+        { index: 1, codec_name: 'ass', disposition: { forced: 1 }, tags: { language: 'eng', title: 'English' } },
+        { index: 2, codec_name: 'ass', disposition: { forced: 0 }, tags: { language: 'eng', title: 'English' } },
+      ],
+    });
+    const result = parseSubtitleStreams(output, 'eng');
+    expect(result).toEqual({ index: 2, codec: 'ass' });
+  });
+
+  it('ignores streams with title containing "[Forced]" or "signs" in favor of full dialogue stream', () => {
+    const output = JSON.stringify({
+      streams: [
+        { index: 1, codec_name: 'ass', tags: { language: 'eng', title: 'English [Forced]' } },
+        { index: 2, codec_name: 'ass', tags: { language: 'eng', title: 'English Dialogue' } },
+      ],
+    });
+    const result = parseSubtitleStreams(output, 'eng');
+    expect(result).toEqual({ index: 2, codec: 'ass' });
+  });
+
+  it('prioritizes streams with disposition: { default: 1 } among dialogue streams', () => {
+    const output = JSON.stringify({
+      streams: [
+        { index: 1, codec_name: 'ass', disposition: { default: 0 }, tags: { language: 'eng', title: 'Secondary Dialogue' } },
+        { index: 2, codec_name: 'ass', disposition: { default: 1 }, tags: { language: 'eng', title: 'Default Dialogue' } },
+      ],
+    });
+    const result = parseSubtitleStreams(output, 'eng');
+    expect(result).toEqual({ index: 2, codec: 'ass' });
+  });
+
+  it('returns null when all streams for requested language are forced or signs/songs', () => {
+    const output = JSON.stringify({
+      streams: [
+        { index: 1, codec_name: 'ass', disposition: { forced: 1 }, tags: { language: 'eng', title: 'Signs & Songs' } },
+        { index: 2, codec_name: 'subrip', tags: { language: 'eng', title: 'English [Forced]' } },
+      ],
+    });
+    const result = parseSubtitleStreams(output, 'eng');
+    expect(result).toBeNull();
   });
 
   it('applies sign/song exclusion when only bitmap streams are available', () => {
@@ -98,6 +143,28 @@ describe('parseSubtitleStreams', () => {
     expect(parseSubtitleStreams('not-json', 'eng')).toBeNull();
     expect(parseSubtitleStreams('{}', 'eng')).toBeNull();
     expect(parseSubtitleStreams(JSON.stringify({ streams: [] }), 'eng')).toBeNull();
+  });
+});
+
+describe('isForcedOrSignsStream', () => {
+  it('returns true when disposition.forced === 1', () => {
+    expect(isForcedOrSignsStream({ index: 0, disposition: { forced: 1 } })).toBe(true);
+  });
+
+  it('returns true when title contains forced (case-insensitive)', () => {
+    expect(isForcedOrSignsStream({ index: 0, tags: { title: 'English [FORCED]' } })).toBe(true);
+  });
+
+  it('returns true when title contains sign or song', () => {
+    expect(isForcedOrSignsStream({ index: 0, tags: { title: 'Signs & Songs' } })).toBe(true);
+    expect(isForcedOrSignsStream({ index: 0, tags: { title: 'Insert Song' } })).toBe(true);
+    expect(isForcedOrSignsStream({ index: 0, tags: { title: 'Signs only' } })).toBe(true);
+  });
+
+  it('returns false for full dialogue streams', () => {
+    expect(isForcedOrSignsStream({ index: 0, disposition: { forced: 0 }, tags: { title: 'English Dialogue' } })).toBe(false);
+    expect(isForcedOrSignsStream({ index: 0, tags: { title: 'Full' } })).toBe(false);
+    expect(isForcedOrSignsStream({ index: 0 })).toBe(false);
   });
 });
 

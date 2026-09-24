@@ -73,6 +73,13 @@ describe('AnimeDataset', () => {
     const row = db.prepare('SELECT anilist_id FROM anime_ids WHERE anilist_id = ?').get(154587);
     expect(row).toBeDefined();
   });
+
+  it('instantiates AnimeDataset from an existing table', () => {
+    const db = new Database(':memory:');
+    AnimeDataset.buildFromRaw(sampleRaw, db);
+    const dataset = AnimeDataset.fromExistingTable(db);
+    expect(dataset.findByAnilistId(154587)).toEqual({ anilistId: 154587, anidbId: 17617, title: null });
+  });
 });
 
 describe('downloadDataset', () => {

@@ -44,6 +44,10 @@ export class AnimeDataset {
     this.db = db;
   }
 
+  static fromExistingTable(db: Database.Database): AnimeDataset {
+    return new AnimeDataset(db);
+  }
+
   static buildFromRaw(raw: RawDataset, db: Database.Database): AnimeDataset {
     const rebuild = db.transaction((entries: RawDatasetEntry[]) => {
       db.exec(`

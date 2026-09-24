@@ -16,6 +16,8 @@ describe('findAnimeToshoSubtitle', () => {
   const expectedBatchAssPath = '/storage/attach/000003ea/%5BGroup%5D%20BatchShow%20-%2002%20%5B1080p%5D_track2.eng.ass.xz';
   const expectedFallbackSrtPath = '/storage/attach/000007d1/%5BGroup%5D%20Fallback%20Show%20-%2001%20%5B1080p%5D_track2.eng.srt.xz';
   const expectedExpandedAssPath = '/storage/attach/00000bb9/%5BGroup%5D%20Show%2006%20%5B1080p%5D_track3.eng.ass.xz';
+  const expectedBroadBatchAssPath = '/storage/attach/00000fa1/%5BGroup%5D%20BroadBatch%20-%2005%20%5B1080p%5D_track2.eng.ass.xz';
+  const expectedFlakySrtPath = '/storage/attach/000013ed/%5BGroup%5D%20FlakyShow%20-%2005%20(alt)%20%5B720p%5D_track2.eng.srt.xz';
 
   beforeAll(async () => {
     compressedAssSubtitle = execFileSync('xz', ['-c'], {
@@ -34,7 +36,7 @@ describe('findAnimeToshoSubtitle', () => {
         lastSearchUrl = req.url!;
         const aid = url.searchParams.get('aid');
         const q = url.searchParams.get('q');
-        if (aid === '18886') {
+        if (aid === '18886' && q !== '999') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify([
             { id: 1, title: '[Group] Show - 05 (1080p) [ABCD1234].mkv', status: 'complete', num_files: 1 },
@@ -53,6 +55,22 @@ describe('findAnimeToshoSubtitle', () => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify([
             { id: 30, title: '[Group] Show 06 [1080p].mkv', status: 'complete', num_files: 1 },
+          ]));
+        } else if (aid === '39999' && !q) {
+          // broader aid-only search finds a batch release the q=-filtered search missed
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 40, title: '[Group] BroadBatch (01-12) [1080p]', status: 'complete', num_files: 12 },
+          ]));
+        } else if (aid === '39999' && q) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([]));
+        } else if (aid === '49999') {
+          // simulates a torrent-detail fetch that fails for the first candidate
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 50, title: '[Group] FlakyShow - 05 [1080p].mkv', status: 'complete', num_files: 1 },
+            { id: 51, title: '[Group] FlakyShow - 05 (alt) [720p].mkv', status: 'complete', num_files: 1 },
           ]));
         } else if (!aid && q && (q.startsWith('Fallback Show') || q.startsWith('Fallback  Show'))) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -142,6 +160,31 @@ describe('findAnimeToshoSubtitle', () => {
             ],
           }],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '40') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [
+            {
+              filename: '[Group] BroadBatch - 05 [1080p].mkv',
+              attachments: [
+                { id: 4001, type: 'subtitle', info: { codec: 'ASS', lang: 'eng', tracknum: 2 } },
+              ],
+            },
+          ],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '50') {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Internal Server Error');
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '51') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] FlakyShow - 05 (alt) [720p].mkv',
+            attachments: [
+              { id: 5101, type: 'subtitle', info: { codec: 'SRT', lang: 'eng', tracknum: 2 } },
+            ],
+          }],
+        }));
       } else if (url.pathname === expectedAssPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
@@ -160,6 +203,12 @@ describe('findAnimeToshoSubtitle', () => {
       } else if (url.pathname === expectedExpandedAssPath) {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
+      } else if (url.pathname === expectedBroadBatchAssPath) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedAssSubtitle);
+      } else if (url.pathname === expectedFlakySrtPath) {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedSrtSubtitle);
       } else {
         res.writeHead(404);
         res.end();
@@ -257,11 +306,21 @@ describe('findAnimeToshoSubtitle', () => {
     expect(result.vttContent).toContain('AnimeTosho SRT fixture line');
   });
 
-  it('returns seriesNotFound: true when both aid and title search return 0 results', async () => {
+  it('does not set seriesNotFound when anidbId is present, even if aid, broad, and title searches all miss', async () => {
     const result = await findAnimeToshoSubtitle(99999, 1, 'eng', {
       feedBaseUrl: baseUrl,
       storageBaseUrl: baseUrl,
       title: 'Nonexistent Show',
+    });
+    expect(result.found).toBe(false);
+    expect(result.seriesNotFound).toBeFalsy();
+  });
+
+  it('sets seriesNotFound true when anidbId is null and the title search also misses', async () => {
+    const result = await findAnimeToshoSubtitle(null, 1, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+      title: 'Totally Unknown Show',
     });
     expect(result.found).toBe(false);
     expect(result.seriesNotFound).toBe(true);
@@ -269,6 +328,24 @@ describe('findAnimeToshoSubtitle', () => {
 
   it('matches expanded episode regex formats in findAnimeToshoSubtitle for [Group] Show 06 [1080p]', async () => {
     const result = await findAnimeToshoSubtitle(29999, 6, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
+  });
+
+  it('does not abort the whole search when one candidate torrent-detail fetch fails', async () => {
+    const result = await findAnimeToshoSubtitle(49999, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho SRT fixture line');
+  });
+
+  it('does not set seriesNotFound from an anidbId-scoped episode search alone', async () => {
+    const result = await findAnimeToshoSubtitle(18886, 999, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(false);
+    expect(result.seriesNotFound).toBeFalsy();
+  });
+
+  it('falls back to a broader aid-only search to catch batch releases the q=-filtered search missed', async () => {
+    const result = await findAnimeToshoSubtitle(39999, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
     expect(result.found).toBe(true);
     expect(result.vttContent).toContain('AnimeTosho fixture line');
   });

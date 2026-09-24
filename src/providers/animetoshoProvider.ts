@@ -77,12 +77,22 @@ export async function findAnimeToshoSubtitle(
   const timeoutMs = opts.timeoutMs ?? 8000;
 
   let results: ToshoSearchResult[] = [];
+  let anidbSeriesUnindexed = false;
 
   if (anidbId !== null) {
     results = await fetchJson<ToshoSearchResult[]>(
       `${feedBaseUrl}/json?t=search&aid=${anidbId}&q=${episode}&limit=50`,
       { timeoutMs },
     );
+    if (results.length === 0) {
+      // Broader, unfiltered search: catches batch releases whose title
+      // doesn't literally contain the bare episode number, which the
+      // q= server-side text filter can otherwise exclude.
+      results = await fetchJson<ToshoSearchResult[]>(
+        `${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`,
+        { timeoutMs },
+      );
+    }
   }
 
   if (results.length === 0 && opts.title) {
@@ -92,62 +102,70 @@ export async function findAnimeToshoSubtitle(
         `${feedBaseUrl}/json?t=search&q=${encodeURIComponent(`${cleanTitle} ${episode}`)}&limit=50`,
         { timeoutMs },
       );
+      anidbSeriesUnindexed = anidbId === null && results.length === 0;
     }
+  } else if (results.length === 0 && anidbId === null) {
+    anidbSeriesUnindexed = true;
   }
 
   if (results.length === 0) {
-    return { found: false, seriesNotFound: true };
+    return { found: false, seriesNotFound: anidbSeriesUnindexed };
   }
 
   const candidates = results.filter((r) => r.status === 'complete');
 
   for (const candidate of candidates) {
-    let targetFile: ToshoFile | undefined;
+    try {
+      let targetFile: ToshoFile | undefined;
 
-    if (candidate.num_files === 1) {
-      if (parseEpisodeNumber(candidate.title) !== episode) {
+      if (candidate.num_files === 1) {
+        if (parseEpisodeNumber(candidate.title) !== episode) {
+          continue;
+        }
+        const detail = await fetchJson<ToshoTorrentDetail>(
+          `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
+          { timeoutMs },
+        );
+        if (!detail.files || detail.files.length === 0) continue;
+        targetFile = detail.files[0];
+      } else if (candidate.num_files > 1) {
+        const detail = await fetchJson<ToshoTorrentDetail>(
+          `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
+          { timeoutMs },
+        );
+        if (!detail.files || detail.files.length === 0) continue;
+        targetFile = detail.files.find((f) => parseEpisodeNumber(f.filename) === episode);
+        if (!targetFile) continue;
+      } else {
         continue;
       }
-      const detail = await fetchJson<ToshoTorrentDetail>(
-        `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
-        { timeoutMs },
+
+      const subtitleAttachments = (targetFile.attachments ?? []).filter(
+        (a) => a.type === 'subtitle' && a.info?.lang === lang && a.info?.codec && a.info.tracknum !== undefined,
       );
-      if (!detail.files || detail.files.length === 0) continue;
-      targetFile = detail.files[0];
-    } else if (candidate.num_files > 1) {
-      const detail = await fetchJson<ToshoTorrentDetail>(
-        `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
-        { timeoutMs },
-      );
-      if (!detail.files || detail.files.length === 0) continue;
-      targetFile = detail.files.find((f) => parseEpisodeNumber(f.filename) === episode);
-      if (!targetFile) continue;
-    } else {
+
+      for (const attachment of subtitleAttachments) {
+        const url = buildAttachmentUrl(
+          storageBaseUrl,
+          attachment.id,
+          targetFile.filename,
+          attachment.info!.tracknum!,
+          lang,
+          attachment.info!.codec!,
+        );
+        const compressed = await fetchBuffer(url, { timeoutMs });
+        const decompressed = await decompressXz(compressed);
+        const codecLower = attachment.info!.codec!.toLowerCase();
+        const ext = codecLower === 'ass' || codecLower === 'ssa' ? 'ass' : 'srt';
+        const vttContent = await convertToVtt(decompressed, ext, lang);
+        if (!isAcceptableSubtitle(vttContent, lang)) {
+          continue;
+        }
+        return { found: true, vttContent };
+      }
+    } catch (err) {
+      console.warn(`[AnimeTosho] Candidate ${candidate.id} failed: ${(err as Error).message}`);
       continue;
-    }
-
-    const subtitleAttachments = (targetFile.attachments ?? []).filter(
-      (a) => a.type === 'subtitle' && a.info?.lang === lang && a.info?.codec && a.info.tracknum !== undefined,
-    );
-
-    for (const attachment of subtitleAttachments) {
-      const url = buildAttachmentUrl(
-        storageBaseUrl,
-        attachment.id,
-        targetFile.filename,
-        attachment.info!.tracknum!,
-        lang,
-        attachment.info!.codec!,
-      );
-      const compressed = await fetchBuffer(url, { timeoutMs });
-      const decompressed = await decompressXz(compressed);
-      const codecLower = attachment.info!.codec!.toLowerCase();
-      const ext = codecLower === 'ass' || codecLower === 'ssa' ? 'ass' : 'srt';
-      const vttContent = await convertToVtt(decompressed, ext, lang);
-      if (!isAcceptableSubtitle(vttContent, lang)) {
-        continue;
-      }
-      return { found: true, vttContent };
     }
   }
 

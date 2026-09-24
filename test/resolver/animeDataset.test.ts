@@ -56,6 +56,23 @@ describe('AnimeDataset', () => {
     const row = dataset.findByAnilistId(199111);
     expect(row?.title).toBe('Grand Blue Season 3');
   });
+
+  it('leaves the previous table intact when a rebuild fails partway through insertion', () => {
+    const db = new Database(':memory:');
+    AnimeDataset.buildFromRaw(sampleRaw, db); // first successful build
+
+    const badRaw = {
+      data: [
+        { sources: null },
+      ],
+    };
+    // @ts-expect-error -- intentionally malformed to simulate a bad upstream entry
+    expect(() => AnimeDataset.buildFromRaw(badRaw, db)).toThrow();
+
+    // The table from the first successful build must still be queryable.
+    const row = db.prepare('SELECT anilist_id FROM anime_ids WHERE anilist_id = ?').get(154587);
+    expect(row).toBeDefined();
+  });
 });
 
 describe('downloadDataset', () => {

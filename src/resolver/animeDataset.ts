@@ -45,29 +45,30 @@ export class AnimeDataset {
   }
 
   static buildFromRaw(raw: RawDataset, db: Database.Database): AnimeDataset {
-    db.exec(`
-      DROP TABLE IF EXISTS anime_ids;
-      CREATE TABLE anime_ids (
-        anilist_id INTEGER,
-        anidb_id INTEGER,
-        kitsu_id INTEGER,
-        mal_id INTEGER,
-        title TEXT
-      );
-      CREATE INDEX idx_anilist ON anime_ids(anilist_id);
-      CREATE INDEX idx_anidb ON anime_ids(anidb_id);
-      CREATE INDEX idx_kitsu ON anime_ids(kitsu_id);
-      CREATE INDEX idx_mal ON anime_ids(mal_id);
-    `);
-    const insert = db.prepare('INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id, title) VALUES (?, ?, ?, ?, ?)');
-    const insertMany = db.transaction((entries: RawDatasetEntry[]) => {
+    const rebuild = db.transaction((entries: RawDatasetEntry[]) => {
+      db.exec(`
+        DROP TABLE IF EXISTS anime_ids;
+        CREATE TABLE anime_ids (
+          anilist_id INTEGER,
+          anidb_id INTEGER,
+          kitsu_id INTEGER,
+          mal_id INTEGER,
+          title TEXT
+        );
+        CREATE INDEX idx_anilist ON anime_ids(anilist_id);
+        CREATE INDEX idx_anidb ON anime_ids(anidb_id);
+        CREATE INDEX idx_kitsu ON anime_ids(kitsu_id);
+        CREATE INDEX idx_mal ON anime_ids(mal_id);
+      `);
+      const insert = db.prepare('INSERT INTO anime_ids (anilist_id, anidb_id, kitsu_id, mal_id, title) VALUES (?, ?, ?, ?, ?)');
       for (const entry of entries) {
         const ids = extractIds(entry.sources);
         if (ids.anilistId === null && ids.anidbId === null && ids.kitsuId === null && ids.malId === null) continue;
         insert.run(ids.anilistId, ids.anidbId, ids.kitsuId, ids.malId, entry.title ?? null);
       }
     });
-    insertMany(raw.data);
+
+    rebuild(raw.data);
     return new AnimeDataset(db);
   }
 

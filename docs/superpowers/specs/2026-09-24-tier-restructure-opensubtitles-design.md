@@ -18,7 +18,7 @@ Date: 2026-09-24
    - **Tier 2 — Embedded extraction**: today's ffmpeg pipeline, used only when Tier 1 finds nothing.
 2. Add OpenSubtitles as a third Tier-1 provider, keyed by IMDB ID resolved from the anime's AniDB ID.
 3. Fix the season/episode mismatch properly (not with a heuristic) by integrating the `Anime-Lists/anime-lists` community mapping dataset, which exists specifically to convert between AniDB episode numbers and TVDB (proxy for IMDB) season/episode numbers, including season-split and offset rules.
-4. Respect OpenSubtitles' free-tier download quota (5/day) without corrupting the existing negative-cache semantics — a quota skip must never be recorded as "this series has no subtitles on OpenSubtitles."
+4. Respect OpenSubtitles' download quota (100/day — the user has obtained an API key with an elevated quota, not the base free-tier default of 5) without corrupting the existing negative-cache semantics — a quota skip must never be recorded as "this series has no subtitles on OpenSubtitles."
 5. Fix the structural single-subtitle cap: surface one subtitle track per provider that has a match, not one per language.
 6. Close the existing `tt`-prefixed content ID gap using the same new mapping infrastructure, in reverse.
 
@@ -123,6 +123,7 @@ CREATE TABLE provider_quota (
 ```
 - `getRemainingQuota(provider, dailyLimit): number` — resets `count` to 0 and `window_start` to now if the existing window is >24h old, then returns `dailyLimit - count`.
 - `recordDownloadUsed(provider): void` — increments `count` in the current window.
+- `dailyLimit` is not hardcoded — it comes from `config.openSubtitlesDailyQuota` (see `config.ts` below), since it depends on the tier of API key in use, not a fixed constant.
 
 **`ProviderResult.quotaSkipped` handling (critical correctness point, subtitlesHandler.ts):** when a provider result has `quotaSkipped: true`, the negative-cache / `setSeriesProviderMiss` path must be skipped entirely for that provider on that call — this is the fix for the pitfall identified during design (a quota-exhausted day must not get recorded as "OpenSubtitles has no subtitles for this series," which would incorrectly suppress retries for the full 24h negative-cache TTL even after quota resets).
 
@@ -150,6 +151,11 @@ export interface CacheKey {
 
 - `/vtt` route path gains the provider segment: `/vtt/:anilistId/:episode/:lang/:provider.vtt`.
 
+### 8. `src/config.ts` (modified)
+
+- `openSubtitlesApiKey: string` (env `OPENSUBTITLES_API_KEY`, required) — the user already has a key.
+- `openSubtitlesDailyQuota: number` (env `OPENSUBTITLES_DAILY_QUOTA`, default `5` to match the OpenSubtitles free-tier default for anyone else running this addon; the user's own deployment sets this to `100` via `.env` to match their elevated key).
+
 ## Relationship to the existing code-review findings (`docs/code-review-2026-09-24.md`)
 
 Resolved as a natural consequence of this redesign:
@@ -170,4 +176,4 @@ Not addressed by this design, remain separate fixes in the implementation plan:
 
 - `anime-lists` coverage is community-maintained and not exhaustive — brand-new or very obscure titles may have no entry, in which case OpenSubtitles/tt-id-resolution simply doesn't apply for that title (graceful miss, not a regression from today).
 - TVDB season boundaries are used as a proxy for IMDB season boundaries when a direct `imdbid` isn't present in `anime-lists`. This is the same assumption the wider `*arr` ecosystem (Sonarr/Bazarr/FileBot) relies on for this exact problem; it is occasionally wrong but far smaller a risk than the original naive `season=1` assumption.
-- OpenSubtitles free-tier quota (5 downloads/24h) means this provider will realistically contribute a handful of episodes per day — it's a supplementary Tier-1 source, not expected to match Jimaku/AnimeTosho's hit volume.
+- At 100 downloads/24h, OpenSubtitles can meaningfully contribute alongside Jimaku/AnimeTosho rather than being a trickle — but it's still a shared, finite daily budget across every episode watched, so the quota guard and the quota-skip/negative-cache distinction (Component 5) remain load-bearing, not a formality.

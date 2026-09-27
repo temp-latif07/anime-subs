@@ -136,10 +136,22 @@ export class CacheStore {
   }
 
   purgeKnownForcedEntries(): number {
-    const KNOWN_FORCED_KEYS = ['195600:2:eng:animetosho'];
+    const KNOWN_FORCED_KEYS = [
+      '195600:2:eng:animetosho',
+      '195600:3:eng:animetosho',
+      '195600:4:eng:animetosho',
+    ];
     let count = 0;
     for (const rawKey of KNOWN_FORCED_KEYS) {
       if (this.deleteByKey(rawKey)) {
+        count++;
+      }
+    }
+    const seriesRows = this.db
+      .prepare("SELECT key FROM cache WHERE key LIKE '195600:%:animetosho'")
+      .all() as { key: string }[];
+    for (const row of seriesRows) {
+      if (this.deleteByKey(row.key)) {
         count++;
       }
     }

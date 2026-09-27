@@ -91,18 +91,30 @@ describe('CacheStore', () => {
     expect(existsSync(filePath)).toBe(false);
   });
 
-  it('purges known forced cache entries (e.g. 195600:2:eng:animetosho) on initialization', () => {
-    const forcedKey = { anilistId: 195600, episode: 2, lang: 'eng', provider: 'animetosho' as const };
-    const filePath = store.setReady(forcedKey, 'WEBVTT\n\n1\nForced subtitle line');
-    expect(store.get(forcedKey)).not.toBeNull();
-    expect(existsSync(filePath)).toBe(true);
+  it('purges known forced cache entries (e.g. 195600:2:eng:animetosho, 195600:3:eng:animetosho, 195600:4:eng:animetosho) on initialization', () => {
+    const forcedKey2 = { anilistId: 195600, episode: 2, lang: 'eng', provider: 'animetosho' as const };
+    const forcedKey3 = { anilistId: 195600, episode: 3, lang: 'eng', provider: 'animetosho' as const };
+    const forcedKey4 = { anilistId: 195600, episode: 4, lang: 'eng', provider: 'animetosho' as const };
+    const filePath2 = store.setReady(forcedKey2, 'WEBVTT\n\n1\nForced subtitle line 2');
+    const filePath3 = store.setReady(forcedKey3, 'WEBVTT\n\n1\nForced subtitle line 3');
+    const filePath4 = store.setReady(forcedKey4, 'WEBVTT\n\n1\nForced subtitle line 4');
+    expect(store.get(forcedKey2)).not.toBeNull();
+    expect(store.get(forcedKey3)).not.toBeNull();
+    expect(store.get(forcedKey4)).not.toBeNull();
+    expect(existsSync(filePath2)).toBe(true);
+    expect(existsSync(filePath3)).toBe(true);
+    expect(existsSync(filePath4)).toBe(true);
 
     // Re-initialize a new CacheStore on the same directory
     const dbPath = join(dir, 'cache.db');
     const newStore = new CacheStore(dbPath, join(dir, 'files'));
     try {
-      expect(newStore.get(forcedKey)).toBeNull();
-      expect(existsSync(filePath)).toBe(false);
+      expect(newStore.get(forcedKey2)).toBeNull();
+      expect(newStore.get(forcedKey3)).toBeNull();
+      expect(newStore.get(forcedKey4)).toBeNull();
+      expect(existsSync(filePath2)).toBe(false);
+      expect(existsSync(filePath3)).toBe(false);
+      expect(existsSync(filePath4)).toBe(false);
     } finally {
       newStore.close();
     }

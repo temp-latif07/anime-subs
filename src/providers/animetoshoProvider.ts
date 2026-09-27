@@ -95,55 +95,17 @@ export interface AnimeToshoOptions {
   title?: string | null;
 }
 
-export async function findAnimeToshoSubtitle(
-  anidbId: number | null,
+async function resolveSubtitleFromCandidates(
+  candidates: ToshoSearchResult[],
   episode: number,
   lang: string,
-  opts: AnimeToshoOptions = {},
-): Promise<ProviderResult> {
-  const feedBaseUrl = (opts.feedBaseUrl ?? 'https://feed.animetosho.xyz').replace(/\/+$/, '');
-  const storageBaseUrl = (opts.storageBaseUrl ?? 'https://storage.animetosho.xyz').replace(/\/+$/, '');
-  const timeoutMs = opts.timeoutMs ?? 8000;
+  feedBaseUrl: string,
+  storageBaseUrl: string,
+  timeoutMs: number,
+): Promise<ProviderResult | null> {
+  const completeCandidates = candidates.filter((r) => r.status === 'complete');
 
-  let results: ToshoSearchResult[] = [];
-  let anidbSeriesUnindexed = false;
-
-  if (anidbId !== null) {
-    results = await fetchJson<ToshoSearchResult[]>(
-      `${feedBaseUrl}/json?t=search&aid=${anidbId}&q=${episode}&limit=50`,
-      { timeoutMs },
-    );
-    if (results.length === 0) {
-      // Broader, unfiltered search: catches batch releases whose title
-      // doesn't literally contain the bare episode number, which the
-      // q= server-side text filter can otherwise exclude.
-      results = await fetchJson<ToshoSearchResult[]>(
-        `${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`,
-        { timeoutMs },
-      );
-    }
-  }
-
-  if (results.length === 0 && opts.title) {
-    const cleanTitle = opts.title.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    if (cleanTitle) {
-      results = await fetchJson<ToshoSearchResult[]>(
-        `${feedBaseUrl}/json?t=search&q=${encodeURIComponent(`${cleanTitle} ${episode}`)}&limit=50`,
-        { timeoutMs },
-      );
-      anidbSeriesUnindexed = anidbId === null && results.length === 0;
-    }
-  } else if (results.length === 0 && anidbId === null) {
-    anidbSeriesUnindexed = true;
-  }
-
-  if (results.length === 0) {
-    return { found: false, seriesNotFound: anidbSeriesUnindexed };
-  }
-
-  const candidates = results.filter((r) => r.status === 'complete');
-
-  for (const candidate of candidates) {
+  for (const candidate of completeCandidates) {
     try {
       let targetFile: ToshoFile | undefined;
       let detail: ToshoTorrentDetail | undefined;
@@ -226,5 +188,65 @@ export async function findAnimeToshoSubtitle(
     }
   }
 
-  return { found: false };
+  return null;
+}
+
+export async function findAnimeToshoSubtitle(
+  anidbId: number | null,
+  episode: number,
+  lang: string,
+  opts: AnimeToshoOptions = {},
+): Promise<ProviderResult> {
+  const feedBaseUrl = (opts.feedBaseUrl ?? 'https://feed.animetosho.xyz').replace(/\/+$/, '');
+  const storageBaseUrl = (opts.storageBaseUrl ?? 'https://storage.animetosho.xyz').replace(/\/+$/, '');
+  const timeoutMs = opts.timeoutMs ?? 8000;
+
+  const paddedEp = String(episode).padStart(2, '0');
+  const epQueries = paddedEp !== String(episode) ? [paddedEp, String(episode)] : [String(episode)];
+
+  if (anidbId !== null) {
+    for (const q of epQueries) {
+      const results = await fetchJson<ToshoSearchResult[]>(
+        `${feedBaseUrl}/json?t=search&aid=${anidbId}&q=${q}&limit=50`,
+        { timeoutMs },
+      );
+      if (results.length > 0) {
+        const match = await resolveSubtitleFromCandidates(results, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+        if (match) return match;
+      }
+    }
+
+    // Broader, unfiltered search: catches batch releases whose title
+    // doesn't literally contain the bare episode number, which the
+    // q= server-side text filter can otherwise exclude.
+    const broadResults = await fetchJson<ToshoSearchResult[]>(
+      `${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`,
+      { timeoutMs },
+    );
+    if (broadResults.length > 0) {
+      const match = await resolveSubtitleFromCandidates(broadResults, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      if (match) return match;
+    }
+  }
+
+  let titleResultsSeen = 0;
+  if (opts.title) {
+    const cleanTitle = opts.title.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleanTitle) {
+      for (const q of epQueries) {
+        const results = await fetchJson<ToshoSearchResult[]>(
+          `${feedBaseUrl}/json?t=search&q=${encodeURIComponent(`${cleanTitle} ${q}`)}&limit=50`,
+          { timeoutMs },
+        );
+        titleResultsSeen += results.length;
+        if (results.length > 0) {
+          const match = await resolveSubtitleFromCandidates(results, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+          if (match) return match;
+        }
+      }
+    }
+  }
+
+  const seriesNotFound = anidbId === null && titleResultsSeen === 0;
+  return { found: false, seriesNotFound };
 }

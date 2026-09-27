@@ -97,6 +97,27 @@ describe('findAnimeToshoSubtitle', () => {
           res.end(JSON.stringify([
             { id: 70, title: '[Group] XyzShow - 08 [1080p].mkv', status: 'complete', num_files: 1 },
           ]));
+        } else if (aid === '89999') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          if (q === '04') {
+            res.end(JSON.stringify([
+              { id: 92, title: '[Group] Matched - 04 [1080p].mkv', status: 'complete', num_files: 1 },
+            ]));
+          } else {
+            res.end(JSON.stringify([
+              { id: 91, title: '[Group] Unmatched - S01E11 [1080p].mkv', status: 'complete', num_files: 1 },
+            ]));
+          }
+        } else if (aid === '89998') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 91, title: '[Group] Unmatched - S01E11 [1080p].mkv', status: 'complete', num_files: 1 },
+          ]));
+        } else if (!aid && q && q.includes('MyTitle')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 92, title: '[Group] Matched - 04 [1080p].mkv', status: 'complete', num_files: 1 },
+          ]));
         } else if (!aid && q && (q.startsWith('Fallback Show') || q.startsWith('Fallback  Show'))) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify([
@@ -263,6 +284,22 @@ describe('findAnimeToshoSubtitle', () => {
             { id: 7002, info: { language: 'English', language_code: 'eng', format: 'ASS', default: true, forced: false }, size: 35000, url: '/direct/download/7002.xz' },
           ],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '91') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 91,
+          title: '[Group] Unmatched - S01E11 [1080p].mkv',
+          attachments: [],
+        }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '92') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          id: 92,
+          title: '[Group] Matched - 04 [1080p].mkv',
+          attachments: [
+            { id: 9201, info: { language: 'English', language_code: 'eng', format: 'ASS', default: true, forced: false }, size: 35000, url: '/direct/download/7002.xz' },
+          ],
+        }));
       } else if (url.pathname === '/direct/download/7002.xz') {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
@@ -361,13 +398,29 @@ describe('findAnimeToshoSubtitle', () => {
     expect(result.found).toBe(false);
   });
 
-  it('includes targeted episode in aid search query (q=5)', async () => {
+  it('includes targeted episode in aid search query (q=05 or q=5)', async () => {
     lastSearchUrl = null;
     await findAnimeToshoSubtitle(18886, 5, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
     expect(lastSearchUrl).toBeDefined();
     const parsed = new URL(lastSearchUrl!, baseUrl);
     expect(parsed.searchParams.get('aid')).toBe('18886');
-    expect(parsed.searchParams.get('q')).toBe('5');
+    expect(['05', '5']).toContain(parsed.searchParams.get('q'));
+  });
+
+  it('searches with 2-digit padded episode number for single-digit episodes when unpadded search yields non-matching candidate', async () => {
+    const result = await findAnimeToshoSubtitle(89999, 4, 'eng', { feedBaseUrl: baseUrl, storageBaseUrl: baseUrl });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
+  });
+
+  it('falls back to title search when aid search returns results that do not match the target episode', async () => {
+    const result = await findAnimeToshoSubtitle(89998, 4, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+      title: 'MyTitle',
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
   });
 
   it('parses batch torrents (num_files > 1) by iterating detail.files to match episode', async () => {

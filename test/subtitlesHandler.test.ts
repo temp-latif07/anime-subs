@@ -32,9 +32,9 @@ const dataset = AnimeDataset.buildFromRaw({
 
 const baseConfig: Config = {
   port: 7000, dataDir: '/tmp', streamAddonUrl: 'https://stream.example.com/manifest.json',
-  jimakuApiKey: 'key', subtitleLanguages: ['eng'], negativeCacheTtlHours: 24,
+  subtitleLanguages: ['eng'], negativeCacheTtlHours: 24,
   extractionConcurrency: 2, enableConcurrentExtraction: true, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
-  openSubtitlesApiKey: 'test-key', openSubtitlesDailyQuota: 100, vttWaitMs: 500,
+  vttWaitMs: 500,
 };
 
 describe('handleSubtitlesRequest', () => {
@@ -52,9 +52,7 @@ describe('handleSubtitlesRequest', () => {
       queue: new ExtractionQueue(1),
       config: baseConfig,
       buildSubtitleUrl: (key) => `https://addon.example.com/vtt/${key.anilistId}/${key.episode}/${key.lang}/${key.provider}.vtt`,
-      jimakuProvider: vi.fn(async () => ({ found: false })),
       animetoshoProvider: vi.fn(async () => ({ found: false })),
-      opensubtitlesProvider: vi.fn(async () => ({ found: false })),
       extractionProvider: vi.fn(async () => ({ found: false })),
     };
   });
@@ -64,96 +62,49 @@ describe('handleSubtitlesRequest', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('surfaces one subtitle track per Tier-1 provider that finds a match, not just one', async () => {
-    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
-    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
+  it('surfaces one subtitle track per provider that finds a match, not just one', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: true };
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
+    deps.extractionProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nextraction hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toHaveLength(2);
-    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'jimaku']);
+    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'extraction']);
   });
 
   it('initiates Tier 1 and extraction concurrently on uncached request, returning both tracks', async () => {
     deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
-    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
 
-    // Both Jimaku and Extraction should be present
-    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['extraction', 'jimaku']);
+    // Both AnimeTosho and Extraction should be present
+    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'extraction']);
     // Extraction provider was started
     expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })?.status).toBe('pending');
   });
 
   it('does not initiate background extraction when a Tier 1 provider is already cached ready', async () => {
-    cache.setReady({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' }, 'WEBVTT\n\n1\ncached');
+    cache.setReady({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' }, 'WEBVTT\n\n1\ncached');
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
 
-    expect(result.subtitles.map((s) => s.provider)).toEqual(['jimaku']);
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['animetosho']);
     expect(deps.extractionProvider).not.toHaveBeenCalled();
     expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })).toBeNull();
   });
 
   it('preserves sequential fallback when enableConcurrentExtraction is false', async () => {
     deps.config = { ...deps.config, enableConcurrentExtraction: false };
-    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
 
-    expect(result.subtitles.map((s) => s.provider)).toEqual(['jimaku']);
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['animetosho']);
     expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })).toBeNull();
   });
 
-  it('does not double-charge the OpenSubtitles quota or double-call a provider for two concurrent requests of the same episode', async () => {
-    let jimakuCallCount = 0;
-    let osCallCount = 0;
-    deps.jimakuProvider = vi.fn(() => {
-      jimakuCallCount++;
-      return new Promise<ProviderResult>((resolve) => setTimeout(() => resolve({ found: true, vttContent: 'WEBVTT\n\n1\nx' }), 20));
-    });
-    deps.opensubtitlesProvider = vi.fn(() => {
-      osCallCount++;
-      return new Promise<ProviderResult>((resolve) => setTimeout(() => resolve({ found: true, vttContent: 'WEBVTT\n\n1\nos', downloadAttempted: true }), 20));
-    });
-    await Promise.all([
-      handleSubtitlesRequest('kitsu:46474:1:5', deps),
-      handleSubtitlesRequest('kitsu:46474:1:5', deps),
-    ]);
-    expect(jimakuCallCount).toBe(1);
-    expect(osCallCount).toBe(1);
-    expect(cache.getRemainingQuota('opensubtitles', deps.config.openSubtitlesDailyQuota)).toBe(deps.config.openSubtitlesDailyQuota - 1);
-  });
-
-  it('records OpenSubtitles quota usage whenever a download was attempted, even if the file is rejected afterward as low quality', async () => {
-    deps.opensubtitlesProvider = vi.fn(async () => ({ found: false, downloadAttempted: true }));
-    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    expect(cache.getRemainingQuota('opensubtitles', deps.config.openSubtitlesDailyQuota)).toBe(deps.config.openSubtitlesDailyQuota - 1);
-  });
-
-  it('does not set the negative cache for OpenSubtitles when the result is quota-skipped', async () => {
-    deps.opensubtitlesProvider = vi.fn(async () => ({ found: false, quotaSkipped: true }));
-    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' as const };
-    expect(cache.get(key)).toBeNull(); // not negative -- must remain retryable once quota resets
-  });
-
-  it('sets the negative cache for OpenSubtitles on a genuine miss (not quota-skipped)', async () => {
-    deps.opensubtitlesProvider = vi.fn(async () => ({ found: false }));
-    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' as const };
-    expect(cache.get(key)?.status).toBe('negative');
-  });
-
   it('does not negative-cache a Tier-1 provider miss caused by a thrown error, unlike a genuine found:false miss', async () => {
-    deps.jimakuProvider = vi.fn(async () => { throw new Error('jimaku 503 Service Unavailable'); });
+    deps.animetoshoProvider = vi.fn(async () => { throw new Error('animetosho 503 Service Unavailable'); });
     await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' as const };
+    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' as const };
     expect(cache.get(key)).toBeNull(); // not negative -- must remain retryable, this was never a real miss
-  });
-
-  it('does not negative-cache OpenSubtitles when the provider throws (e.g. a transient HTTP error)', async () => {
-    deps.opensubtitlesProvider = vi.fn(async () => { throw new Error('opensubtitles 500 Internal Server Error'); });
-    await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' as const };
-    expect(cache.get(key)).toBeNull();
   });
 
   it('does not negative-cache the extraction key when cache.setReady throws after a successful extraction', async () => {
@@ -191,22 +142,21 @@ describe('handleSubtitlesRequest', () => {
       config: { ...baseConfig, enableConcurrentExtraction: false },
       dataset: { current: localDataset },
       episodeMapping: localMapping,
-      jimakuProvider: vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nmatch' })),
+      animetoshoProvider: vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nmatch' })),
     };
 
     const result = await handleSubtitlesRequest('tt9999999:2:15', localDeps);
-    expect(localDeps.jimakuProvider).toHaveBeenCalledWith(
-      2001,
+    expect(localDeps.animetoshoProvider).toHaveBeenCalledWith(
+      1001,
       3,
       'eng',
-      localDeps.config.jimakuApiKey,
       expect.any(Object),
     );
     expect(result.subtitles).toEqual([
       {
         lang: 'eng',
-        provider: 'jimaku',
-        url: 'https://addon.example.com/vtt/2001/3/eng/jimaku.vtt',
+        provider: 'animetosho',
+        url: 'https://addon.example.com/vtt/2001/3/eng/animetosho.vtt',
       },
     ]);
   });
@@ -254,15 +204,7 @@ describe('handleSubtitlesRequest', () => {
     expect((await handleSubtitlesRequest('tt99999:1:1', deps)).subtitles).toEqual([]);
   });
 
-  it('returns a tier-1 (Jimaku) hit and caches it', async () => {
-    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
-    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku hit' }));
-    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'jimaku', url: 'https://addon.example.com/vtt/154587/5/eng/jimaku.vtt' }]);
-    expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' })?.status).toBe('ready');
-  });
-
-  it('returns AnimeTosho hit when Jimaku finds nothing', async () => {
+  it('returns a tier-1 (AnimeTosho) hit and caches it', async () => {
     deps.config = { ...baseConfig, enableConcurrentExtraction: false };
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
@@ -291,52 +233,29 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('skips a request whose negative cache entries have not expired', async () => {
-    cache.setNegative({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' });
     cache.setNegative({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' });
-    cache.setNegative({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' });
     cache.setNegative({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' });
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toEqual([]);
-    expect(deps.jimakuProvider).not.toHaveBeenCalled();
     expect(deps.animetoshoProvider).not.toHaveBeenCalled();
-    expect(deps.opensubtitlesProvider).not.toHaveBeenCalled();
     expect(deps.extractionProvider).not.toHaveBeenCalled();
   });
 
   it('retries providers if negative cache has expired', async () => {
     deps.config = { ...baseConfig, enableConcurrentExtraction: false };
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' as const };
+    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' as const };
     cache.setNegative(key);
     // Artificially age the entry past 24 hours
     const oldTime = Date.now() - 25 * 60 * 60 * 1000;
     (cache as unknown as { db: Database.Database }).db
       .prepare('UPDATE cache SET updated_at = ? WHERE key = ?')
-      .run(oldTime, '154587:5:eng:jimaku');
+      .run(oldTime, '154587:5:eng:animetosho');
 
-    deps.jimakuProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\njimaku retry' }));
-    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'jimaku', url: 'https://addon.example.com/vtt/154587/5/eng/jimaku.vtt' }]);
-    expect(deps.jimakuProvider).toHaveBeenCalledTimes(1);
-    expect(cache.get(key)?.status).toBe('ready');
-  });
-
-  it('surfaces AnimeTosho match when Jimaku throws an error', async () => {
-    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
-    deps.jimakuProvider = vi.fn(async () => {
-      throw new Error('Jimaku timeout');
-    });
-    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho fallback' }));
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho retry' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'animetosho', url: 'https://addon.example.com/vtt/154587/5/eng/animetosho.vtt' }]);
-    expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' })?.status).toBe('ready');
-    expect(deps.animetoshoProvider).toHaveBeenCalledWith(
-      17617,
-      5,
-      'eng',
-      expect.objectContaining({
-        timeoutMs: deps.config.providerTimeoutMs,
-      }),
-    );
+    expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
+    expect(cache.get(key)?.status).toBe('ready');
   });
 
   it('sets negative cache when extraction provider resolves with found: false', async () => {
@@ -358,46 +277,38 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('returns cached ready subtitle immediately without invoking providers', async () => {
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' as const };
+    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' as const };
     cache.setReady(key, 'WEBVTT\n\n1\nready');
-    cache.setNegative({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' });
-    cache.setNegative({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'opensubtitles' });
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'jimaku', url: 'https://addon.example.com/vtt/154587/5/eng/jimaku.vtt' }]);
-    expect(deps.jimakuProvider).not.toHaveBeenCalled();
+    expect(result.subtitles).toEqual([{ lang: 'eng', provider: 'animetosho', url: 'https://addon.example.com/vtt/154587/5/eng/animetosho.vtt' }]);
     expect(deps.animetoshoProvider).not.toHaveBeenCalled();
-    expect(deps.opensubtitlesProvider).not.toHaveBeenCalled();
     expect(deps.extractionProvider).not.toHaveBeenCalled();
   });
 
-  it('queries uncached tier-1 providers and merges hits even if another tier-1 provider is cached as ready', async () => {
-    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'jimaku' as const };
+  it('queries uncached tier-1 providers and merges hits even if extraction is cached as ready', async () => {
+    const key = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' as const };
     cache.setReady(key, 'WEBVTT\n\n1\nready');
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
-    deps.opensubtitlesProvider = vi.fn(async () => ({ found: false }));
 
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toHaveLength(2);
-    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'jimaku']);
-    expect(deps.jimakuProvider).not.toHaveBeenCalled();
+    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'extraction']);
     expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
-    expect(deps.opensubtitlesProvider).toHaveBeenCalledTimes(1);
     expect(deps.extractionProvider).not.toHaveBeenCalled();
   });
 
   it('handles multiple configured languages', async () => {
     deps.config = { ...baseConfig, subtitleLanguages: ['eng', 'spa'], enableConcurrentExtraction: false };
-    deps.jimakuProvider = vi.fn(async (_anilistId, _episode, lang) => {
+    deps.animetoshoProvider = vi.fn(async (_anidbId, _episode, lang) => {
       if (lang === 'eng') return { found: true, vttContent: 'WEBVTT\n\n1\neng' };
       return { found: false };
     });
-    deps.animetoshoProvider = vi.fn(async () => ({ found: false }));
     deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
 
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
     expect(result.subtitles).toHaveLength(2);
     expect(result.subtitles).toEqual([
-      { lang: 'eng', provider: 'jimaku', url: 'https://addon.example.com/vtt/154587/5/eng/jimaku.vtt' },
+      { lang: 'eng', provider: 'animetosho', url: 'https://addon.example.com/vtt/154587/5/eng/animetosho.vtt' },
       { lang: 'spa', provider: 'extraction', url: 'https://addon.example.com/vtt/154587/5/spa/extraction.vtt' },
     ]);
   });
@@ -405,11 +316,10 @@ describe('handleSubtitlesRequest', () => {
   it('processes multiple configured languages concurrently', async () => {
     deps.config = { ...baseConfig, subtitleLanguages: ['eng', 'spa'] };
     const started: string[] = [];
-    deps.jimakuProvider = vi.fn((_anilistId, _episode, lang) => {
+    deps.animetoshoProvider = vi.fn((_anidbId, _episode, lang) => {
       started.push(lang);
       return new Promise<ProviderResult>((resolve) => setTimeout(() => resolve({ found: false }), 20));
     });
-    deps.animetoshoProvider = vi.fn(async () => ({ found: false }));
     deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
 
     const promise = handleSubtitlesRequest('kitsu:46474:1:5', deps);
@@ -418,19 +328,16 @@ describe('handleSubtitlesRequest', () => {
     await promise;
   });
 
-  it('skips Jimaku and AnimeTosho for subsequent episodes when series-level miss is recorded', async () => {
-    deps.jimakuProvider = vi.fn(async () => ({ found: false, seriesNotFound: true }));
+  it('skips AnimeTosho for subsequent episodes when series-level miss is recorded', async () => {
     deps.animetoshoProvider = vi.fn(async () => ({ found: false, seriesNotFound: true }));
     deps.extractionProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nextracted' }));
 
     // Episode 5 query
     await handleSubtitlesRequest('kitsu:46474:1:5', deps);
-    expect(deps.jimakuProvider).toHaveBeenCalledTimes(1);
     expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
 
     // Episode 6 query
     await handleSubtitlesRequest('kitsu:46474:1:6', deps);
-    expect(deps.jimakuProvider).toHaveBeenCalledTimes(1);
     expect(deps.animetoshoProvider).toHaveBeenCalledTimes(1);
   });
 

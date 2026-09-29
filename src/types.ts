@@ -1,5 +1,5 @@
 export type CacheStatus = 'pending' | 'ready' | 'negative';
-export type CacheProvider = 'jimaku' | 'animetosho' | 'opensubtitles' | 'extraction';
+export type CacheProvider = 'animetosho' | 'extraction';
 
 export interface CacheKey {
   anilistId: number;
@@ -19,9 +19,7 @@ export interface ProviderResult {
   found: boolean;
   vttContent?: string;
   seriesNotFound?: boolean;
-  quotaSkipped?: boolean;
   transient?: boolean;
-  downloadAttempted?: boolean;
 }
 
 export interface SubtitleCandidate {

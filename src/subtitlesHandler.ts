@@ -20,9 +20,7 @@ export interface SubtitlesHandlerDeps {
   queue: ExtractionQueue;
   config: Config;
   buildSubtitleUrl: (key: CacheKey) => string;
-  jimakuProvider: (anilistId: number, episode: number, lang: string, apiKey: string, opts?: { timeoutMs?: number }) => Promise<ProviderResult>;
   animetoshoProvider: (anidbId: number | null, episode: number, lang: string, opts?: { timeoutMs?: number; title?: string | null; feedBaseUrl?: string; storageBaseUrl?: string }) => Promise<ProviderResult>;
-  opensubtitlesProvider: (imdbId: string | null, tvdbSeason: number | null, tvdbEpisode: number | null, lang: string, apiKey: string, opts?: { timeoutMs?: number; hasQuota?: boolean }) => Promise<ProviderResult>;
   extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>;
 }
 
@@ -42,15 +40,9 @@ function runProvider(
   provider: CacheProvider,
   baseKey: { anilistId: number; episode: number; lang: string },
   anidbId: number | null,
-  imdbId: string | null,
   deps: SubtitlesHandlerDeps,
   title: string | null,
 ): Promise<ProviderResult> {
-  if (provider === 'jimaku') {
-    return deps
-      .jimakuProvider(baseKey.anilistId, baseKey.episode, baseKey.lang, deps.config.jimakuApiKey, { timeoutMs: deps.config.providerTimeoutMs })
-      .catch((err) => { console.warn(`[Jimaku] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
-  }
   if (provider === 'animetosho') {
     return deps
       .animetoshoProvider(anidbId, baseKey.episode, baseKey.lang, {
@@ -59,18 +51,13 @@ function runProvider(
       })
       .catch((err) => { console.warn(`[AnimeTosho] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
   }
-  const tvdb = anidbId !== null ? deps.episodeMapping.mapAnidbToTvdbEpisode(anidbId, baseKey.episode) : null;
-  const hasQuota = deps.cache.getRemainingQuota('opensubtitles', deps.config.openSubtitlesDailyQuota) > 0;
-  return deps
-    .opensubtitlesProvider(imdbId, tvdb?.season ?? null, tvdb?.episode ?? null, baseKey.lang, deps.config.openSubtitlesApiKey, { timeoutMs: deps.config.providerTimeoutMs, hasQuota })
-    .catch((err) => { console.warn(`[OpenSubtitles] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
+  return Promise.resolve({ found: false });
 }
 
 async function tryDatabaseTier(
   baseKey: { anilistId: number; episode: number; lang: string },
   providersToTry: CacheProvider[],
   anidbId: number | null,
-  imdbId: string | null,
   deps: SubtitlesHandlerDeps,
   title: string | null,
 ): Promise<CacheProvider[]> {
@@ -79,24 +66,20 @@ async function tryDatabaseTier(
   await Promise.allSettled(providersToTry.map(async (provider) => {
     const key: CacheKey = { ...baseKey, provider };
     const existing = deps.cache.getInFlight(key);
-    const job = existing ?? runProvider(provider, baseKey, anidbId, imdbId, deps, title);
+    const job = existing ?? runProvider(provider, baseKey, anidbId, deps, title);
     if (!existing) deps.cache.setInFlight(key, job);
 
     try {
       const result = await job;
-      if (!existing && provider === 'opensubtitles' && result.downloadAttempted) {
-        deps.cache.recordDownloadUsed('opensubtitles');
-      }
       if (result.found && result.vttContent) {
         deps.cache.setReady(key, result.vttContent);
         hits.push(provider);
         return;
       }
-      if ((provider === 'jimaku' || provider === 'animetosho') && result.seriesNotFound) {
-        const seriesId = provider === 'jimaku' ? baseKey.anilistId : anidbId;
-        if (seriesId !== null) deps.cache.setSeriesProviderMiss(provider, seriesId);
+      if (provider === 'animetosho' && result.seriesNotFound) {
+        if (anidbId !== null) deps.cache.setSeriesProviderMiss(provider, anidbId);
       }
-      if (!result.quotaSkipped && !result.transient) deps.cache.setNegative(key);
+      if (!result.transient) deps.cache.setNegative(key);
     } finally {
       if (!existing) deps.cache.clearInFlight(key);
     }
@@ -108,13 +91,12 @@ async function tryDatabaseTier(
 async function resolveOneLanguage(
   baseKey: { anilistId: number; episode: number; lang: string },
   anidbId: number | null,
-  imdbId: string | null,
   originalParsed: ParsedSubtitleRequestId,
   deps: SubtitlesHandlerDeps,
   mediaType: string | undefined,
   title: string | null,
 ): Promise<CacheProvider[]> {
-  const tier1Providers: CacheProvider[] = ['jimaku', 'animetosho', 'opensubtitles'];
+  const tier1Providers: CacheProvider[] = ['animetosho'];
   const readyProviders: CacheProvider[] = [];
   const toTry: CacheProvider[] = [];
 
@@ -124,7 +106,6 @@ async function resolveOneLanguage(
     if (cached?.status === 'ready') { readyProviders.push(provider); continue; }
     if (cached?.status === 'negative' && !deps.cache.isNegativeExpired(cached, deps.config.negativeCacheTtlHours)) continue;
     if (cached?.status === 'pending') continue; // in-flight elsewhere; skip, don't duplicate
-    if (provider === 'jimaku' && deps.cache.hasSeriesProviderMiss('jimaku', baseKey.anilistId, deps.config.negativeCacheTtlHours)) continue;
     if (provider === 'animetosho') {
       const toshoMissed = anidbId !== null
         ? deps.cache.hasSeriesProviderMiss('animetosho', anidbId, deps.config.negativeCacheTtlHours)
@@ -141,7 +122,7 @@ async function resolveOneLanguage(
   // 1. Fast Cache Path: If any Tier 1 provider is already ready, check if extraction is also ready/pending
   if (readyProviders.length > 0) {
     if (toTry.length > 0) {
-      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
+      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
       readyProviders.push(...hits);
     }
     if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) {
@@ -179,7 +160,7 @@ async function resolveOneLanguage(
     }
 
     if (toTry.length > 0) {
-      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
+      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
       readyProviders.push(...hits);
     }
 
@@ -191,7 +172,7 @@ async function resolveOneLanguage(
 
   // 3. Sequential Fallback Path (ENABLE_CONCURRENT_EXTRACTION=false)
   if (toTry.length > 0) {
-    const hits = await tryDatabaseTier(baseKey, toTry, anidbId, imdbId, deps, title);
+    const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
     readyProviders.push(...hits);
   }
 
@@ -274,7 +255,7 @@ export async function handleSubtitlesRequest(
   const results = await Promise.all(
     deps.config.subtitleLanguages.map(async (lang) => {
       const baseKey = { anilistId, episode, lang };
-      const hitProviders = await resolveOneLanguage(baseKey, ids.anidbId, ids.imdbId ?? null, parsed, deps, mediaType, ids.title ?? null);
+      const hitProviders = await resolveOneLanguage(baseKey, ids.anidbId, parsed, deps, mediaType, ids.title ?? null);
       return hitProviders.map((provider): SubtitleCandidate => ({
         lang,
         provider,

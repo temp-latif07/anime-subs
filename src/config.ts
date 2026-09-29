@@ -2,7 +2,6 @@ export interface Config {
   port: number;
   dataDir: string;
   streamAddonUrl: string;
-  jimakuApiKey: string;
   subtitleLanguages: string[];
   negativeCacheTtlHours: number;
   extractionConcurrency: number;
@@ -11,8 +10,6 @@ export interface Config {
   providerTimeoutMs: number;
   probeTimeoutMs: number;
   logLevel: string;
-  openSubtitlesApiKey: string;
-  openSubtitlesDailyQuota: number;
   vttWaitMs: number;
 }
 
@@ -63,7 +60,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: requireInt(env, 'PORT', 7000),
     dataDir: env.DATA_DIR ?? '/data',
     streamAddonUrl: requireUrl(env, 'STREAM_ADDON_URL'),
-    jimakuApiKey: requireEnv(env, 'JIMAKU_API_KEY'),
     subtitleLanguages,
     negativeCacheTtlHours: requireInt(env, 'NEGATIVE_CACHE_TTL_HOURS', 24),
     extractionConcurrency: requireInt(env, 'EXTRACTION_CONCURRENCY', 2),
@@ -72,8 +68,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     providerTimeoutMs: requireInt(env, 'PROVIDER_TIMEOUT_MS', 8000),
     probeTimeoutMs: requireInt(env, 'PROBE_TIMEOUT_MS', 15000),
     logLevel: env.LOG_LEVEL ?? 'info',
-    openSubtitlesApiKey: requireEnv(env, 'OPENSUBTITLES_API_KEY'),
-    openSubtitlesDailyQuota: requireInt(env, 'OPENSUBTITLES_DAILY_QUOTA', 100),
     vttWaitMs: requireInt(env, 'VTT_WAIT_MS', 20000),
   };
 }

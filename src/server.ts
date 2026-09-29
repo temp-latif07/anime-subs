@@ -7,9 +7,7 @@ import type { CacheProvider } from './types.js';
 import { normalizeVtt } from './ffmpeg/vttUtils.js';
 
 const PROVIDER_LABELS: Record<CacheProvider, string> = {
-  jimaku: 'Jimaku',
   animetosho: 'AnimeTosho',
-  opensubtitles: 'OpenSubtitles',
   extraction: 'Extracted',
 };
 

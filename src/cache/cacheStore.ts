@@ -50,7 +50,7 @@ export class CacheStore {
     const cols = columns ?? (this.db.prepare("PRAGMA table_info(cache)").all() as { name: string }[]);
     const hasTier = cols.some((c) => c.name === 'tier');
     if (!hasTier) return;
-    const TIER_TO_PROVIDER: Record<number, CacheProvider> = { 1: 'jimaku', 2: 'animetosho', 3: 'extraction' };
+    const TIER_TO_PROVIDER: Record<number, CacheProvider> = { 2: 'animetosho', 3: 'extraction' };
     const rows = this.db.prepare("SELECT key, tier FROM cache WHERE provider IS NULL AND tier IS NOT NULL").all() as { key: string; tier: number }[];
     const update = this.db.prepare('UPDATE OR REPLACE cache SET provider = ?, key = ? WHERE key = ?');
     for (const row of rows) {
@@ -174,7 +174,7 @@ export class CacheStore {
     this.inFlight.delete(keyId(key));
   }
 
-  setSeriesProviderMiss(provider: 'jimaku' | 'animetosho', seriesId: number): void {
+  setSeriesProviderMiss(provider: 'animetosho', seriesId: number): void {
     const id = `${provider}:${seriesId}`;
     this.db.prepare(`
       INSERT INTO series_provider_cache (id, provider, series_id, updated_at) VALUES (?, ?, ?, ?)
@@ -182,7 +182,7 @@ export class CacheStore {
     `).run(id, provider, seriesId, Date.now());
   }
 
-  hasSeriesProviderMiss(provider: 'jimaku' | 'animetosho', seriesId: number, ttlHours: number): boolean {
+  hasSeriesProviderMiss(provider: 'animetosho', seriesId: number, ttlHours: number): boolean {
     const id = `${provider}:${seriesId}`;
     const row = this.db
       .prepare('SELECT updated_at FROM series_provider_cache WHERE id = ?')

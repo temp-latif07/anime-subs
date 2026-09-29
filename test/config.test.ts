@@ -3,8 +3,6 @@ import { loadConfig } from '../src/config.js';
 
 const baseEnv = {
   STREAM_ADDON_URL: 'https://aiostreams.example.com/abc123/manifest.json',
-  JIMAKU_API_KEY: 'test-key',
-  OPENSUBTITLES_API_KEY: 'test-opensubtitles-key',
 };
 
 describe('loadConfig', () => {
@@ -36,11 +34,6 @@ describe('loadConfig', () => {
     expect(() => loadConfig(rest as NodeJS.ProcessEnv)).toThrow(/STREAM_ADDON_URL/);
   });
 
-  it('throws a descriptive error when JIMAKU_API_KEY is missing', () => {
-    const { JIMAKU_API_KEY, ...rest } = baseEnv;
-    expect(() => loadConfig(rest as NodeJS.ProcessEnv)).toThrow(/JIMAKU_API_KEY/);
-  });
-
   it('throws when STREAM_ADDON_URL is not a valid URL', () => {
     expect(() => loadConfig({ ...baseEnv, STREAM_ADDON_URL: 'not-a-url' } as NodeJS.ProcessEnv))
       .toThrow(/not a valid URL/);
@@ -58,16 +51,6 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...baseEnv, SUBTITLE_LANGUAGES: '' } as NodeJS.ProcessEnv)).toThrow(/SUBTITLE_LANGUAGES/);
   });
 
-  it('requires OPENSUBTITLES_API_KEY and throws a clear error when missing', () => {
-    const env = { ...baseEnv };
-    delete (env as Record<string, string | undefined>).OPENSUBTITLES_API_KEY;
-    expect(() => loadConfig(env as NodeJS.ProcessEnv)).toThrow(/OPENSUBTITLES_API_KEY/);
-  });
-
-  it('defaults openSubtitlesDailyQuota to 100 and reads OPENSUBTITLES_DAILY_QUOTA', () => {
-    expect(loadConfig(baseEnv as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(100);
-    expect(loadConfig({ ...baseEnv, OPENSUBTITLES_DAILY_QUOTA: '200' } as NodeJS.ProcessEnv).openSubtitlesDailyQuota).toBe(200);
-  });
 
   it('defaults vttWaitMs to 20000ms and reads VTT_WAIT_MS', () => {
     expect(loadConfig(baseEnv as NodeJS.ProcessEnv).vttWaitMs).toBe(20000);

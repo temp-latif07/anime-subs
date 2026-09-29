@@ -8,7 +8,7 @@ import { CacheStore } from '../../src/cache/cacheStore.js';
 describe('CacheStore', () => {
   let dir: string;
   let store: CacheStore;
-  const key = { anilistId: 154587, episode: 10, lang: 'eng', provider: 'jimaku' as const };
+  const key = { anilistId: 154587, episode: 10, lang: 'eng', provider: 'animetosho' as const };
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'animesubs-cache-'));
@@ -25,11 +25,11 @@ describe('CacheStore', () => {
   });
 
   it('round-trips a ready entry and writes the vtt file to disk', () => {
-    const toshoKey = { ...key, provider: 'animetosho' as const };
-    const filePath = store.setReady(toshoKey, 'WEBVTT\n\n1\nhello');
-    const entry = store.get(toshoKey)!;
+    const extractionKey = { ...key, provider: 'extraction' as const };
+    const filePath = store.setReady(extractionKey, 'WEBVTT\n\n1\nhello');
+    const entry = store.get(extractionKey)!;
     expect(entry.status).toBe('ready');
-    expect(entry.provider).toBe('animetosho');
+    expect(entry.provider).toBe('extraction');
     expect(entry.filePath).toBe(filePath);
     expect(readFileSync(filePath, 'utf-8')).toBe('WEBVTT\n\n1\nhello');
   });
@@ -136,11 +136,11 @@ describe('CacheStore', () => {
   });
 
   it('keys the same episode/lang independently per provider', () => {
-    const jimakuKey = { ...key, provider: 'jimaku' as const };
+    const extractionKey = { ...key, provider: 'extraction' as const };
     const toshoKey = { ...key, provider: 'animetosho' as const };
-    store.setReady(jimakuKey, 'WEBVTT\n\n1\njimaku');
+    store.setReady(extractionKey, 'WEBVTT\n\n1\nextraction');
     expect(store.get(toshoKey)).toBeNull();
-    expect(store.get(jimakuKey)?.status).toBe('ready');
+    expect(store.get(extractionKey)?.status).toBe('ready');
   });
 
   it('migrates an old-schema row (tier column, no provider) to the provider column on read', () => {
@@ -169,23 +169,22 @@ describe('CacheStore', () => {
         updated_at INTEGER NOT NULL
       );
     `);
-    oldDb.prepare("INSERT INTO cache (key, status, tier, file_path, updated_at) VALUES (?, 'ready', 1, '/tmp/j.vtt', ?)")
+    oldDb.prepare("INSERT INTO cache (key, status, tier, file_path, updated_at) VALUES (?, 'ready', 2, '/tmp/t.vtt', ?)")
       .run('154587:10:eng', Date.now());
     oldDb.close();
 
     store = new CacheStore(dbPath, join(dir, 'files'));
-    const entry = store.get(key);
+    const entry = store.get({ ...key, provider: 'animetosho' });
     expect(entry).not.toBeNull();
     expect(entry?.status).toBe('ready');
-    expect(entry?.provider).toBe('jimaku');
+    expect(entry?.provider).toBe('animetosho');
   });
 
   it('records and checks series-level provider negative cache with TTL', () => {
-    expect(store.hasSeriesProviderMiss('jimaku', 154587, 24)).toBe(false);
-    store.setSeriesProviderMiss('jimaku', 154587);
-    expect(store.hasSeriesProviderMiss('jimaku', 154587, 24)).toBe(true);
     expect(store.hasSeriesProviderMiss('animetosho', 154587, 24)).toBe(false);
-    expect(store.hasSeriesProviderMiss('jimaku', 999999, 24)).toBe(false);
+    store.setSeriesProviderMiss('animetosho', 154587);
+    expect(store.hasSeriesProviderMiss('animetosho', 154587, 24)).toBe(true);
+    expect(store.hasSeriesProviderMiss('animetosho', 999999, 24)).toBe(false);
   });
 
   it('reconciles stale pending rows left over from a process restart back to a clean (absent) state', () => {
@@ -214,33 +213,33 @@ describe('CacheStore', () => {
   });
 
   it('tracks remaining quota and decrements when downloads are recorded', () => {
-    expect(store.getRemainingQuota('opensubtitles', 20)).toBe(20);
-    store.recordDownloadUsed('opensubtitles');
-    expect(store.getRemainingQuota('opensubtitles', 20)).toBe(19);
-    store.recordDownloadUsed('opensubtitles');
-    expect(store.getRemainingQuota('opensubtitles', 20)).toBe(18);
+    expect(store.getRemainingQuota('sample-provider', 20)).toBe(20);
+    store.recordDownloadUsed('sample-provider');
+    expect(store.getRemainingQuota('sample-provider', 20)).toBe(19);
+    store.recordDownloadUsed('sample-provider');
+    expect(store.getRemainingQuota('sample-provider', 20)).toBe(18);
   });
 
   it('does not return negative quota when usage exceeds limit', () => {
     for (let i = 0; i < 5; i++) {
-      store.recordDownloadUsed('opensubtitles');
+      store.recordDownloadUsed('sample-provider');
     }
-    expect(store.getRemainingQuota('opensubtitles', 3)).toBe(0);
+    expect(store.getRemainingQuota('sample-provider', 3)).toBe(0);
   });
 
   it('resets quota window after 24 hours', () => {
-    store.recordDownloadUsed('opensubtitles');
+    store.recordDownloadUsed('sample-provider');
     const rawDb = (store as unknown as { db: import('better-sqlite3').Database }).db;
     const past = Date.now() - 25 * 60 * 60 * 1000;
-    rawDb.prepare('UPDATE provider_quota SET window_start = ? WHERE provider = ?').run(past, 'opensubtitles');
-    expect(store.getRemainingQuota('opensubtitles', 20)).toBe(20);
-    store.recordDownloadUsed('opensubtitles');
-    expect(store.getRemainingQuota('opensubtitles', 20)).toBe(19);
+    rawDb.prepare('UPDATE provider_quota SET window_start = ? WHERE provider = ?').run(past, 'sample-provider');
+    expect(store.getRemainingQuota('sample-provider', 20)).toBe(20);
+    store.recordDownloadUsed('sample-provider');
+    expect(store.getRemainingQuota('sample-provider', 20)).toBe(19);
   });
 
   it('tracks quota independently per provider', () => {
-    store.recordDownloadUsed('opensubtitles');
-    expect(store.getRemainingQuota('opensubtitles', 20)).toBe(19);
+    store.recordDownloadUsed('sample-provider');
+    expect(store.getRemainingQuota('sample-provider', 20)).toBe(19);
     expect(store.getRemainingQuota('other', 20)).toBe(20);
   });
 });

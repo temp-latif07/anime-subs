@@ -8,9 +8,7 @@ import { EpisodeMapping, downloadEpisodeMapping } from './resolver/episodeMappin
 import { CacheStore } from './cache/cacheStore.js';
 import { ExtractionQueue } from './queue/extractionQueue.js';
 import { createServer } from './server.js';
-import { findJimakuSubtitle } from './providers/jimakuProvider.js';
 import { findAnimeToshoSubtitle } from './providers/animetoshoProvider.js';
-import { findOpenSubtitlesSubtitle } from './providers/opensubtitlesProvider.js';
 import { runExtractionTier } from './providers/extractionProvider.js';
 import type { DatasetHolder } from './subtitlesHandler.js';
 
@@ -145,9 +143,7 @@ async function main() {
     queue,
     config,
     buildSubtitleUrl: (key) => `/vtt/${key.anilistId}/${key.episode}/${key.lang}/${key.provider}.vtt`,
-    jimakuProvider: findJimakuSubtitle,
     animetoshoProvider: findAnimeToshoSubtitle,
-    opensubtitlesProvider: findOpenSubtitlesSubtitle,
     extractionProvider: runExtractionTier,
   }, cache);
 

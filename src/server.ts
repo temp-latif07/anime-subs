@@ -51,13 +51,17 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
       const countByLang = new Map<string, number>();
       for (const sub of result.subtitles) countByLang.set(sub.lang, (countByLang.get(sub.lang) ?? 0) + 1);
 
-      const subtitles = result.subtitles.map((sub) => ({
-        id: `${sub.lang}-${sub.provider}`,
-        lang: (countByLang.get(sub.lang) ?? 0) > 1 ? `${sub.lang} (${PROVIDER_LABELS[sub.provider]})` : sub.lang,
-        url: sub.url.startsWith('http://') || sub.url.startsWith('https://')
-          ? sub.url
-          : `${origin}${sub.url.startsWith('/') ? '' : '/'}${sub.url}`,
-      }));
+      const subtitles = result.subtitles.map((sub) => {
+        const hasMultiple = (countByLang.get(sub.lang) ?? 0) > 1;
+        return {
+          id: `${sub.lang}-${sub.provider}`,
+          lang: sub.lang,
+          ...(hasMultiple ? { label: `${sub.lang} (${PROVIDER_LABELS[sub.provider]})` } : {}),
+          url: sub.url.startsWith('http://') || sub.url.startsWith('https://')
+            ? sub.url
+            : `${origin}${sub.url.startsWith('/') ? '' : '/'}${sub.url}`,
+        };
+      });
       res.json({ subtitles });
     } catch (err) {
       console.warn(`[HTTP] Error handling subtitles request: ${(err as Error).message}`);

@@ -158,16 +158,18 @@ describe('HTTP contract', () => {
     cache.setReady({ anilistId: 154587, episode: 21, lang: 'eng', provider: 'jimaku' }, 'WEBVTT\n\n1\na');
     cache.setReady({ anilistId: 154587, episode: 21, lang: 'eng', provider: 'animetosho' }, 'WEBVTT\n\n1\nb');
     const res = await fetch(`${baseUrl}/subtitles/series/kitsu:46474:1:21.json`);
-    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string }> };
+    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string; label?: string }> };
     expect(body.subtitles).toHaveLength(2);
-    expect(body.subtitles.map((s) => s.lang).sort()).toEqual(['eng (AnimeTosho)', 'eng (Jimaku)']);
+    expect(body.subtitles.map((s) => s.lang)).toEqual(['eng', 'eng']);
+    expect(body.subtitles.map((s) => s.label).sort()).toEqual(['eng (AnimeTosho)', 'eng (Jimaku)']);
   });
 
-  it('does not relabel lang when only one provider has a hit for that language', async () => {
+  it('does not add a label when only one provider has a hit for that language', async () => {
     cache.setReady({ anilistId: 154587, episode: 22, lang: 'eng', provider: 'jimaku' }, 'WEBVTT\n\n1\nsolo');
     const res = await fetch(`${baseUrl}/subtitles/series/kitsu:46474:1:22.json`);
-    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string }> };
+    const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string; label?: string }> };
     expect(body.subtitles[0].lang).toBe('eng');
+    expect(body.subtitles[0].label).toBeUndefined();
   });
 
   it('passes the requested language through to normalizeVtt when serving a ready file', async () => {

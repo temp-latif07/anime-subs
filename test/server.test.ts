@@ -159,7 +159,7 @@ describe('HTTP contract', () => {
     const body = (await res.json()) as { subtitles: Array<{ id: string; lang: string; url: string; label?: string }> };
     expect(body.subtitles).toHaveLength(2);
     expect(body.subtitles.map((s) => s.lang)).toEqual(['eng', 'eng']);
-    expect(body.subtitles.map((s) => s.label).sort()).toEqual(['eng (AnimeTosho)', 'eng (Extracted)']);
+    expect(body.subtitles.map((s) => s.label).sort()).toEqual(['AnimeTosho', 'Embedded']);
   });
 
   it('does not add a label when only one provider has a hit for that language', async () => {

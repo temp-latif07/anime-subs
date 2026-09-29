@@ -8,7 +8,7 @@ import { normalizeVtt } from './ffmpeg/vttUtils.js';
 
 const PROVIDER_LABELS: Record<CacheProvider, string> = {
   animetosho: 'AnimeTosho',
-  extraction: 'Extracted',
+  extraction: 'Embedded',
 };
 
 export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStore): Express {
@@ -54,7 +54,7 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
         return {
           id: `${sub.lang}-${sub.provider}`,
           lang: sub.lang,
-          ...(hasMultiple ? { label: `${sub.lang} (${PROVIDER_LABELS[sub.provider]})` } : {}),
+          ...(hasMultiple ? { label: PROVIDER_LABELS[sub.provider] } : {}),
           url: sub.url.startsWith('http://') || sub.url.startsWith('https://')
             ? sub.url
             : `${origin}${sub.url.startsWith('/') ? '' : '/'}${sub.url}`,

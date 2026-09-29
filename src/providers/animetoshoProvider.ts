@@ -199,21 +199,29 @@ export async function findAnimeToshoSubtitle(
 ): Promise<ProviderResult> {
   const feedBaseUrl = (opts.feedBaseUrl ?? 'https://feed.animetosho.xyz').replace(/\/+$/, '');
   const storageBaseUrl = (opts.storageBaseUrl ?? 'https://storage.animetosho.xyz').replace(/\/+$/, '');
-  const timeoutMs = opts.timeoutMs ?? 8000;
+  const timeoutMs = opts.timeoutMs ?? 3500;
 
   const paddedEp = String(episode).padStart(2, '0');
   const epQueries = paddedEp !== String(episode) ? [paddedEp, String(episode)] : [String(episode)];
 
   if (anidbId !== null) {
-    for (const q of epQueries) {
-      const results = await fetchJson<ToshoSearchResult[]>(
+    const searchPromises = epQueries.map((q) =>
+      fetchJson<ToshoSearchResult[]>(
         `${feedBaseUrl}/json?t=search&aid=${anidbId}&q=${q}&limit=50`,
         { timeoutMs },
-      );
-      if (results.length > 0) {
-        const match = await resolveSubtitleFromCandidates(results, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
-        if (match) return match;
+      ).catch(() => [] as ToshoSearchResult[]),
+    );
+    const queryResults = await Promise.all(searchPromises);
+    const candidateMap = new Map<number, ToshoSearchResult>();
+    for (const results of queryResults) {
+      for (const item of results) {
+        candidateMap.set(item.id, item);
       }
+    }
+    const candidates = Array.from(candidateMap.values());
+    if (candidates.length > 0) {
+      const match = await resolveSubtitleFromCandidates(candidates.slice(0, 5), episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      if (match) return match;
     }
 
     // Broader, unfiltered search: catches batch releases whose title
@@ -222,9 +230,9 @@ export async function findAnimeToshoSubtitle(
     const broadResults = await fetchJson<ToshoSearchResult[]>(
       `${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`,
       { timeoutMs },
-    );
+    ).catch(() => [] as ToshoSearchResult[]);
     if (broadResults.length > 0) {
-      const match = await resolveSubtitleFromCandidates(broadResults, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      const match = await resolveSubtitleFromCandidates(broadResults.slice(0, 5), episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
       if (match) return match;
     }
   }
@@ -233,16 +241,24 @@ export async function findAnimeToshoSubtitle(
   if (opts.title) {
     const cleanTitle = opts.title.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
     if (cleanTitle) {
-      for (const q of epQueries) {
-        const results = await fetchJson<ToshoSearchResult[]>(
+      const titlePromises = epQueries.map((q) =>
+        fetchJson<ToshoSearchResult[]>(
           `${feedBaseUrl}/json?t=search&q=${encodeURIComponent(`${cleanTitle} ${q}`)}&limit=50`,
           { timeoutMs },
-        );
+        ).catch(() => [] as ToshoSearchResult[]),
+      );
+      const titleResults = await Promise.all(titlePromises);
+      const titleCandidateMap = new Map<number, ToshoSearchResult>();
+      for (const results of titleResults) {
         titleResultsSeen += results.length;
-        if (results.length > 0) {
-          const match = await resolveSubtitleFromCandidates(results, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
-          if (match) return match;
+        for (const item of results) {
+          titleCandidateMap.set(item.id, item);
         }
+      }
+      const titleCandidates = Array.from(titleCandidateMap.values());
+      if (titleCandidates.length > 0) {
+        const match = await resolveSubtitleFromCandidates(titleCandidates.slice(0, 5), episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+        if (match) return match;
       }
     }
   }

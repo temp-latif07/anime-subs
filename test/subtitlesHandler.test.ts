@@ -33,7 +33,7 @@ const dataset = AnimeDataset.buildFromRaw({
 const baseConfig: Config = {
   port: 7000, dataDir: '/tmp', streamAddonUrl: 'https://stream.example.com/manifest.json',
   subtitleLanguages: ['eng'], negativeCacheTtlHours: 24,
-  extractionConcurrency: 2, enableConcurrentExtraction: true, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
+  extractionConcurrency: 2, enableConcurrentExtraction: false, extractionTimeoutMs: 1000, providerTimeoutMs: 1000, probeTimeoutMs: 15000, logLevel: 'info',
   vttWaitMs: 500,
 };
 
@@ -72,6 +72,7 @@ describe('handleSubtitlesRequest', () => {
   });
 
   it('initiates Tier 1 and extraction concurrently on uncached request, returning both tracks', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: true };
     deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));
     deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
     const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
@@ -98,6 +99,42 @@ describe('handleSubtitlesRequest', () => {
 
     expect(result.subtitles.map((s) => s.provider)).toEqual(['animetosho']);
     expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })).toBeNull();
+  });
+
+  it('on uncached request with AnimeTosho hit, returns only animetosho and does not invoke extraction', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
+    deps.extractionProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nextraction hit' }));
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['animetosho']);
+    expect(deps.extractionProvider).not.toHaveBeenCalled();
+    expect(cache.get({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' })).toBeNull();
+  });
+
+  it('returns both animetosho and extraction when animetosho hits and extraction is already cached ready', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
+    cache.setReady({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' }, 'WEBVTT\n\n1\nextraction ready');
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'extraction']);
+    expect(deps.extractionProvider).not.toHaveBeenCalled();
+  });
+
+  it('triggers extraction when AnimeTosho misses on uncached request', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
+    deps.animetoshoProvider = vi.fn(async () => ({ found: false }));
+    deps.extractionProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\nextraction hit' }));
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['extraction']);
+    expect(deps.extractionProvider).toHaveBeenCalled();
+  });
+
+  it('does not include pending extraction when Tier 1 provider is already cached ready', async () => {
+    cache.setReady({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'animetosho' }, 'WEBVTT\n\n1\ncached');
+    cache.setPending({ anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' });
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(result.subtitles.map((s) => s.provider)).toEqual(['animetosho']);
+    expect(deps.extractionProvider).not.toHaveBeenCalled();
   });
 
   it('does not negative-cache a Tier-1 provider miss caused by a thrown error, unlike a genuine found:false miss', async () => {

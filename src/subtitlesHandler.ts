@@ -119,13 +119,13 @@ async function resolveOneLanguage(
   const extractionCached = deps.cache.get(extractionKey);
   const extractionInFlight = deps.cache.getInFlight(extractionKey);
 
-  // 1. Fast Cache Path: If any Tier 1 provider is already ready, check if extraction is also ready/pending
+  // 1. Fast Cache Path: If any Tier 1 provider is already ready, check if extraction is also ready
   if (readyProviders.length > 0) {
     if (toTry.length > 0) {
       const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
       readyProviders.push(...hits);
     }
-    if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) {
+    if (extractionCached?.status === 'ready') {
       readyProviders.push('extraction');
     }
     return readyProviders;
@@ -176,7 +176,12 @@ async function resolveOneLanguage(
     readyProviders.push(...hits);
   }
 
-  if (readyProviders.length > 0) return readyProviders;
+  if (readyProviders.length > 0) {
+    if (extractionCached?.status === 'ready') {
+      readyProviders.push('extraction');
+    }
+    return readyProviders;
+  }
 
   if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) return ['extraction'];
   if (isExtractionNegative) return [];

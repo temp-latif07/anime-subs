@@ -429,4 +429,19 @@ describe('handleSubtitlesRequest', () => {
     const toshoMissCalls = spySetMiss.mock.calls.filter((call) => call[0] === 'animetosho');
     expect(toshoMissCalls).toHaveLength(0);
   });
+
+  it('detects and includes extraction subtitle if background extraction becomes ready while animetosho search is in flight', async () => {
+    deps.config = { ...baseConfig, enableConcurrentExtraction: false };
+    const extractionKey = { anilistId: 154587, episode: 5, lang: 'eng', provider: 'extraction' as const };
+    cache.setPending(extractionKey);
+
+    deps.animetoshoProvider = vi.fn(async () => {
+      // Simulate background extraction finishing while animetosho search was awaiting
+      cache.setReady(extractionKey, 'WEBVTT\n\n1\nextraction ready');
+      return { found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' };
+    });
+
+    const result = await handleSubtitlesRequest('kitsu:46474:1:5', deps);
+    expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'extraction']);
+  });
 });

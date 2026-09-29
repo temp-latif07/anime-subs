@@ -116,7 +116,7 @@ async function resolveOneLanguage(
   }
 
   const extractionKey: CacheKey = { ...baseKey, provider: 'extraction' };
-  const extractionCached = deps.cache.get(extractionKey);
+  let extractionCached = deps.cache.get(extractionKey);
   const extractionInFlight = deps.cache.getInFlight(extractionKey);
 
   // 1. Fast Cache Path: If any Tier 1 provider is already ready, check if extraction is also ready
@@ -125,6 +125,7 @@ async function resolveOneLanguage(
       const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
       readyProviders.push(...hits);
     }
+    extractionCached = deps.cache.get(extractionKey);
     if (extractionCached?.status === 'ready') {
       readyProviders.push('extraction');
     }
@@ -176,6 +177,8 @@ async function resolveOneLanguage(
     readyProviders.push(...hits);
   }
 
+  extractionCached = deps.cache.get(extractionKey);
+
   if (readyProviders.length > 0) {
     if (extractionCached?.status === 'ready') {
       readyProviders.push('extraction');
@@ -183,8 +186,11 @@ async function resolveOneLanguage(
     return readyProviders;
   }
 
+  const isFreshExtractionNegative = extractionCached?.status === 'negative' &&
+    !deps.cache.isNegativeExpired(extractionCached, deps.config.negativeCacheTtlHours);
+
   if (extractionCached?.status === 'ready' || extractionCached?.status === 'pending' || extractionInFlight) return ['extraction'];
-  if (isExtractionNegative) return [];
+  if (isFreshExtractionNegative) return [];
 
   triggerExtraction();
   return ['extraction'];

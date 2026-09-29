@@ -102,10 +102,16 @@ async function resolveSubtitleFromCandidates(
   feedBaseUrl: string,
   storageBaseUrl: string,
   timeoutMs: number,
+  maxDetailFetches: number = 5,
 ): Promise<ProviderResult | null> {
   const completeCandidates = candidates.filter((r) => r.status === 'complete');
+  let detailFetches = 0;
 
   for (const candidate of completeCandidates) {
+    if (detailFetches >= maxDetailFetches) {
+      break;
+    }
+
     try {
       let targetFile: ToshoFile | undefined;
       let detail: ToshoTorrentDetail | undefined;
@@ -114,12 +120,14 @@ async function resolveSubtitleFromCandidates(
         if (parseEpisodeNumber(candidate.title) !== episode) {
           continue;
         }
+        detailFetches++;
         detail = await fetchJson<ToshoTorrentDetail>(
           `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
           { timeoutMs },
         );
         targetFile = detail.files && detail.files.length > 0 ? detail.files[0] : undefined;
       } else if (candidate.num_files > 1) {
+        detailFetches++;
         detail = await fetchJson<ToshoTorrentDetail>(
           `${feedBaseUrl}/json?show=torrent&id=${candidate.id}`,
           { timeoutMs },
@@ -209,18 +217,28 @@ export async function findAnimeToshoSubtitle(
       fetchJson<ToshoSearchResult[]>(
         `${feedBaseUrl}/json?t=search&aid=${anidbId}&q=${q}&limit=50`,
         { timeoutMs },
-      ).catch(() => [] as ToshoSearchResult[]),
+      ),
     );
-    const queryResults = await Promise.all(searchPromises);
+    const searchSettled = await Promise.allSettled(searchPromises);
+    const fulfilledSearch = searchSettled.filter(
+      (r): r is PromiseFulfilledResult<ToshoSearchResult[]> => r.status === 'fulfilled',
+    );
+    if (fulfilledSearch.length === 0) {
+      const firstRejected = searchSettled.find(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      throw firstRejected?.reason ?? new Error('AnimeTosho search failed');
+    }
+
     const candidateMap = new Map<number, ToshoSearchResult>();
-    for (const results of queryResults) {
-      for (const item of results) {
+    for (const res of fulfilledSearch) {
+      for (const item of res.value) {
         candidateMap.set(item.id, item);
       }
     }
     const candidates = Array.from(candidateMap.values());
     if (candidates.length > 0) {
-      const match = await resolveSubtitleFromCandidates(candidates.slice(0, 5), episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      const match = await resolveSubtitleFromCandidates(candidates, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
       if (match) return match;
     }
 
@@ -230,9 +248,9 @@ export async function findAnimeToshoSubtitle(
     const broadResults = await fetchJson<ToshoSearchResult[]>(
       `${feedBaseUrl}/json?t=search&aid=${anidbId}&limit=50`,
       { timeoutMs },
-    ).catch(() => [] as ToshoSearchResult[]);
+    );
     if (broadResults.length > 0) {
-      const match = await resolveSubtitleFromCandidates(broadResults.slice(0, 5), episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      const match = await resolveSubtitleFromCandidates(broadResults, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
       if (match) return match;
     }
   }
@@ -245,19 +263,29 @@ export async function findAnimeToshoSubtitle(
         fetchJson<ToshoSearchResult[]>(
           `${feedBaseUrl}/json?t=search&q=${encodeURIComponent(`${cleanTitle} ${q}`)}&limit=50`,
           { timeoutMs },
-        ).catch(() => [] as ToshoSearchResult[]),
+        ),
       );
-      const titleResults = await Promise.all(titlePromises);
+      const titleSettled = await Promise.allSettled(titlePromises);
+      const fulfilledTitle = titleSettled.filter(
+        (r): r is PromiseFulfilledResult<ToshoSearchResult[]> => r.status === 'fulfilled',
+      );
+      if (fulfilledTitle.length === 0) {
+        const firstRejected = titleSettled.find(
+          (r): r is PromiseRejectedResult => r.status === 'rejected',
+        );
+        throw firstRejected?.reason ?? new Error('AnimeTosho title search failed');
+      }
+
       const titleCandidateMap = new Map<number, ToshoSearchResult>();
-      for (const results of titleResults) {
-        titleResultsSeen += results.length;
-        for (const item of results) {
+      for (const res of fulfilledTitle) {
+        titleResultsSeen += res.value.length;
+        for (const item of res.value) {
           titleCandidateMap.set(item.id, item);
         }
       }
       const titleCandidates = Array.from(titleCandidateMap.values());
       if (titleCandidates.length > 0) {
-        const match = await resolveSubtitleFromCandidates(titleCandidates.slice(0, 5), episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+        const match = await resolveSubtitleFromCandidates(titleCandidates, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
         if (match) return match;
       }
     }

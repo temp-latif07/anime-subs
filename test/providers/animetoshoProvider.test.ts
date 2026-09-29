@@ -174,6 +174,51 @@ describe('findAnimeToshoSubtitle', () => {
             { id: 625, title: '[Group] CapTitleShow - 01 [1080p].mkv', status: 'complete', num_files: 1 },
             { id: 626, title: '[Group] CapTitleShow - 01 [1080p].mkv', status: 'complete', num_files: 1 },
           ]));
+        } else if (aid === '11101') {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Search 500 error');
+        } else if (aid === '11102') {
+          if (q === '01') {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Internal Server Error');
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([
+              { id: 1, title: '[Group] Show - 05 (1080p) [ABCD1234].mkv', status: 'complete', num_files: 1 },
+            ]));
+          }
+        } else if (aid === '11103') {
+          if (q) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([]));
+          } else {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Broad search 500 error');
+          }
+        } else if (aid === '11104') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify([
+            { id: 701, title: '[Group] StatusTest - 05 (1080p).mkv', status: 'pending', num_files: 1 },
+            { id: 702, title: '[Group] StatusTest (Batch)', status: 'skipped', num_files: 12 },
+            { id: 703, title: '[Group] StatusTest - 05 (720p).mkv', status: 'pending', num_files: 1 },
+            { id: 704, title: '[Group] StatusTest (Batch S01)', status: 'skipped', num_files: 12 },
+            { id: 705, title: '[Group] StatusTest - 06 [1080p].mkv', status: 'complete', num_files: 1 },
+            { id: 706, title: '[Group] StatusTest - 05 [1080p].mkv', status: 'complete', num_files: 1 },
+            { id: 707, title: '[Group] StatusTest - 05 (alt) [1080p].mkv', status: 'complete', num_files: 1 },
+          ]));
+        } else if (!aid && q && q.includes('PartialErrorTitle')) {
+          if (q.includes('01')) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Title search partial 500');
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify([
+              { id: 1, title: '[Group] Show - 05 (1080p) [ABCD1234].mkv', status: 'complete', num_files: 1 },
+            ]));
+          }
+        } else if (!aid && q && q.includes('ErrorTitle')) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Title search 500 error');
         } else {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify([]));
@@ -377,6 +422,19 @@ describe('findAnimeToshoSubtitle', () => {
             ],
           }],
         }));
+      } else if (url.pathname === '/json' && url.searchParams.get('show') === 'torrent' && url.searchParams.get('id') === '706') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          files: [{
+            filename: '[Group] StatusTest - 05 [1080p].mkv',
+            attachments: [
+              { id: 7061, type: 'subtitle', url: '/direct/download/7061.xz', info: { codec: 'ASS', lang: 'eng', tracknum: 1 } },
+            ],
+          }],
+        }));
+      } else if (url.pathname === '/direct/download/7061.xz') {
+        res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
+        res.end(compressedAssSubtitle);
       } else if (url.pathname === '/direct/download/7002.xz') {
         res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
         res.end(compressedAssSubtitle);
@@ -655,6 +713,61 @@ describe('findAnimeToshoSubtitle', () => {
     expect(result.found).toBe(false);
     expect(fetchedTorrentDetailIds).toEqual([621, 622, 623, 624, 625]);
     expect(fetchedTorrentDetailIds).not.toContain(626);
+  });
+
+  it('throws error when aid search queries all fail with 5xx or network errors instead of returning found: false', async () => {
+    await expect(
+      findAnimeToshoSubtitle(11101, 1, 'eng', {
+        feedBaseUrl: baseUrl,
+        storageBaseUrl: baseUrl,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('does not throw if at least one episode search query succeeds when another fails', async () => {
+    // aid 11102 fails for '01' but succeeds for '1'
+    const result = await findAnimeToshoSubtitle(11102, 1, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+    });
+    expect(result.found).toBe(false);
+  });
+
+  it('throws error when aid search returns 0 results and broad search fails with 5xx error', async () => {
+    await expect(
+      findAnimeToshoSubtitle(11103, 1, 'eng', {
+        feedBaseUrl: baseUrl,
+        storageBaseUrl: baseUrl,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('throws error when title search queries all fail with 5xx error instead of returning found: false', async () => {
+    await expect(
+      findAnimeToshoSubtitle(null, 1, 'eng', {
+        feedBaseUrl: baseUrl,
+        storageBaseUrl: baseUrl,
+        title: 'ErrorTitle',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('does not throw if at least one title search query succeeds when another fails', async () => {
+    const result = await findAnimeToshoSubtitle(null, 1, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+      title: 'PartialErrorTitle',
+    });
+    expect(result.found).toBe(false);
+  });
+
+  it('does not discard complete matching candidates at position 6+ when earlier candidates are pending, skipped, or for different episodes', async () => {
+    const result = await findAnimeToshoSubtitle(11104, 5, 'eng', {
+      feedBaseUrl: baseUrl,
+      storageBaseUrl: baseUrl,
+    });
+    expect(result.found).toBe(true);
+    expect(result.vttContent).toContain('AnimeTosho fixture line');
   });
 
   it('correctly parses various episode numbering conventions with parseEpisodeNumber', () => {

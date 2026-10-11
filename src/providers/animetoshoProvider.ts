@@ -44,6 +44,12 @@ export function isForcedOrSignsAttachment(info?: ToshoAttachment['info'] | Tosho
   return text.includes('forced') || text.includes('sign') || text.includes('song');
 }
 
+// Mini anime, PVs and creditless OP/ED releases share the series anidb id and
+// have their own "episode N", so they can be mistaken for the real episode.
+export function isNonEpisodeRelease(title: string): boolean {
+  return /mini[\s-]?anime|\bNC(?:OP|ED)\d*\b|\bPV\s*\d*\b|\bCM\b/i.test(title);
+}
+
 interface ToshoFile {
   filename?: string;
   name?: string;
@@ -104,7 +110,7 @@ async function resolveSubtitleFromCandidates(
   timeoutMs: number,
   maxDetailFetches: number = 5,
 ): Promise<ProviderResult | null> {
-  const completeCandidates = candidates.filter((r) => r.status === 'complete');
+  const completeCandidates = candidates.filter((r) => r.status === 'complete' && !isNonEpisodeRelease(r.title));
   let detailFetches = 0;
 
   for (const candidate of completeCandidates) {

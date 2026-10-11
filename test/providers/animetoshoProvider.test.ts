@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { findAnimeToshoSubtitle, parseEpisodeNumber, isForcedOrSignsAttachment } from '../../src/providers/animetoshoProvider.js';
+import { findAnimeToshoSubtitle, parseEpisodeNumber, isForcedOrSignsAttachment, isNonEpisodeRelease } from '../../src/providers/animetoshoProvider.js';
 
 describe('findAnimeToshoSubtitle', () => {
   let server: Server;
@@ -819,3 +819,20 @@ describe('isForcedOrSignsAttachment', () => {
   });
 });
 
+
+describe('isNonEpisodeRelease', () => {
+  it('flags mini anime / shorts releases that share the series anidb id', () => {
+    expect(isNonEpisodeRelease('[BennoSubs] Maomao no Hitorigoto (WEB 1080p) | Kusuriya no Hitorigoto Mini Anime, The Apothecary Diaries Mini Anime')).toBe(true);
+    expect(isNonEpisodeRelease('[Group] Show Mini-Anime - 02 [1080p]')).toBe(true);
+  });
+
+  it('flags PV, creditless OP/ED and extras releases', () => {
+    expect(isNonEpisodeRelease('[Group] Show NCOP1 [BD 1080p]')).toBe(true);
+    expect(isNonEpisodeRelease('[Group] Show - PV 02 [1080p]')).toBe(true);
+  });
+
+  it('does not flag regular episode releases', () => {
+    expect(isNonEpisodeRelease('[sam] Kusuriya no Hitorigoto - 02v2 [BD 1080p FLAC]')).toBe(false);
+    expect(isNonEpisodeRelease('[Erai-raws] Kusuriya no Hitorigoto - 01 ~ 24 [1080p][HEVC][Multiple Subtitle]')).toBe(false);
+  });
+});

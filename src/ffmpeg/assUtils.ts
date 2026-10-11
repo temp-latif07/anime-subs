@@ -64,6 +64,8 @@ export function convertAssToVtt(ass: string, targetLang?: string): string {
 
   const cuesContent: string[] = [];
   let index = 1;
+  // Fansub ASS files often stack identical events (e.g. a shadow/border layer); drop exact repeats.
+  const seen = new Set<string>();
   for (const dialogue of compiled.dialogues as CompiledDialogue[]) {
     const rawText = buildCueText(dialogue, targetLang);
     if (!rawText) continue;
@@ -73,7 +75,10 @@ export function convertAssToVtt(ass: string, targetLang?: string): string {
     const settings = resolvePosition(dialogue.alignment, dialogue.pos, compiled.width, compiled.height);
     const start = formatVttTime(dialogue.start);
     const end = formatVttTime(dialogue.end);
-    cuesContent.push(`${index++}\n${start} --> ${end} ${settings}\n${text}`);
+    const cueBody = `${start} --> ${end} ${settings}\n${text}`;
+    if (seen.has(cueBody)) continue;
+    seen.add(cueBody);
+    cuesContent.push(`${index++}\n${cueBody}`);
   }
 
   if (cuesContent.length === 0) return 'WEBVTT\n\n';

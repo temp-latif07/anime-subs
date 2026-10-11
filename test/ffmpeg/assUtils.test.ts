@@ -3,6 +3,20 @@ import { convertAssToVtt } from '../../src/ffmpeg/assUtils.js';
 import { normalizeVtt } from '../../src/ffmpeg/vttUtils.js';
 
 describe('convertAssToVtt', () => {
+  it('drops cues that duplicate an identical cue (same time, position and text)', () => {
+    const ass = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:21:06.20,0:21:09.83,OP Eng,,0,0,0,,Not just some superficial sweetness
+Dialogue: 1,0:21:06.20,0:21:09.83,OP Eng Shadow,,0,0,0,,Not just some superficial sweetness
+Dialogue: 0,0:21:12.38,0:21:17.05,OP Eng,,0,0,0,,Next line
+`;
+    expect(convertAssToVtt(ass)).toBe(
+      'WEBVTT\n\n' +
+      '1\n00:21:06.200 --> 00:21:09.830 line:90%,end\nNot just some superficial sweetness\n\n' +
+      '2\n00:21:12.380 --> 00:21:17.050 line:90%,end\nNext line\n'
+    );
+  });
+
   it('converts basic dialogue with normalized timestamps and sequential cue numbers', () => {
     const ass = `[Script Info]
 Title: Test

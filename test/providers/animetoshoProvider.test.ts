@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { findAnimeToshoSubtitle, parseEpisodeNumber, isForcedOrSignsAttachment, isNonEpisodeRelease } from '../../src/providers/animetoshoProvider.js';
+import { findAnimeToshoSubtitle, parseEpisodeNumber, isForcedOrSignsAttachment, isNonEpisodeRelease, findEpisodeFile, parseReleaseGroup, parseCrc, isPlausibleSize, rankCandidates } from '../../src/providers/animetoshoProvider.js';
 
 describe('findAnimeToshoSubtitle', () => {
   let server: Server;
@@ -834,5 +834,117 @@ describe('isNonEpisodeRelease', () => {
   it('does not flag regular episode releases', () => {
     expect(isNonEpisodeRelease('[sam] Kusuriya no Hitorigoto - 02v2 [BD 1080p FLAC]')).toBe(false);
     expect(isNonEpisodeRelease('[Erai-raws] Kusuriya no Hitorigoto - 01 ~ 24 [1080p][HEVC][Multiple Subtitle]')).toBe(false);
+  });
+});
+
+describe('parseEpisodeNumber strictness', () => {
+  it('returns null for batch ranges instead of the range end', () => {
+    expect(parseEpisodeNumber('[Erai-raws] Show - 01 ~ 24 [1080p][HEVC]')).toBeNull();
+    expect(parseEpisodeNumber('[Group] Show - 01-24 [BD 1080p]')).toBeNull();
+    expect(parseEpisodeNumber('[Group] Show (01-12) [1080p]')).toBeNull();
+  });
+
+  it('does not treat years or resolutions as episode numbers', () => {
+    expect(parseEpisodeNumber('[Group] Show 2024 [1080p]')).toBeNull();
+    expect(parseEpisodeNumber('[Group] Show 1080 [x265]')).toBeNull();
+  });
+
+  it('still parses plain episodes next to a year in the title', () => {
+    expect(parseEpisodeNumber('[Group] Show (2024) - 05 [1080p]')).toBe(5);
+  });
+});
+
+describe('isNonEpisodeRelease context anchoring', () => {
+  it('does not flag series whose names merely contain CM or PV', () => {
+    expect(isNonEpisodeRelease('[G] CM Punk Show - 03 [1080p]')).toBe(false);
+    expect(isNonEpisodeRelease('[G] PV Show - 03 [1080p]')).toBe(false);
+  });
+
+  it('flags trailers and creditless releases', () => {
+    expect(isNonEpisodeRelease('[G] Show - Trailer 2 [1080p]')).toBe(true);
+    expect(isNonEpisodeRelease('[G] Show Creditless OP [1080p]')).toBe(true);
+    expect(isNonEpisodeRelease('[G] Show - CM 01 [1080p]')).toBe(true);
+  });
+});
+
+describe('findEpisodeFile', () => {
+  it('skips extras inside a batch even when they parse to the target episode', () => {
+    const files = [
+      { filename: '[G] Show Mini Anime - 03 [1080p].mkv' },
+      { filename: '[G] Show - 03 [1080p].mkv' },
+    ];
+    expect(findEpisodeFile(files, 3)?.filename).toBe('[G] Show - 03 [1080p].mkv');
+  });
+
+  it('skips files in extras directories', () => {
+    const files = [
+      { filename: 'Extras/Show - 03 [1080p].mkv' },
+      { filename: 'Show/Show - 03 [1080p].mkv' },
+    ];
+    expect(findEpisodeFile(files, 3)?.filename).toBe('Show/Show - 03 [1080p].mkv');
+  });
+
+  it('returns undefined when only extras match', () => {
+    expect(findEpisodeFile([{ filename: '[G] Show NCED - 03.mkv' }], 3)).toBeUndefined();
+  });
+});
+
+const SAM = { filename: '[sam] Kusuriya no Hitorigoto - 03v2 [BD 1080p FLAC] [4A303FE1].mkv', size: 3107610609 };
+
+describe('release hint helpers', () => {
+  it('extracts the release group and crc from a filename', () => {
+    expect(parseReleaseGroup(SAM.filename)).toBe('sam');
+    expect(parseReleaseGroup('no group here.mkv')).toBeNull();
+    expect(parseCrc(SAM.filename)).toBe('4A303FE1');
+    expect(parseCrc('Show - 01 [1080p].mkv')).toBeNull();
+  });
+
+  it('rejects files far smaller than the playing file but keeps lower-quality encodes', () => {
+    expect(isPlausibleSize(13_538_296, SAM.size)).toBe(false);
+    expect(isPlausibleSize(366_041_368, SAM.size)).toBe(true);
+    expect(isPlausibleSize(2_878_620_305, SAM.size)).toBe(true);
+    expect(isPlausibleSize(13_538_296, undefined)).toBe(true);
+    expect(isPlausibleSize(undefined, SAM.size)).toBe(true);
+  });
+
+  it('ranks same-group candidates first and keeps the rest in order', () => {
+    const c = (id: number, title: string) => ({ id, title, status: 'complete', num_files: 1 });
+    const ranked = rankCandidates(
+      [c(1, '[Erai-raws] Show - 03 [1080p]'), c(2, '[sam] Show - 03 [BD 1080p]'), c(3, '[ASW] Show - 03')],
+      SAM,
+    );
+    expect(ranked.map((r) => r.id)).toEqual([2, 1, 3]);
+  });
+
+  it('is a no-op without a hint', () => {
+    const list = [{ id: 1, title: 'a', status: 'complete', num_files: 1 }, { id: 2, title: 'b', status: 'complete', num_files: 1 }];
+    expect(rankCandidates(list, undefined).map((r) => r.id)).toEqual([1, 2]);
+  });
+
+  it('drops single-file candidates whose total size is implausible', () => {
+    const ranked = rankCandidates(
+      [{ id: 1, title: 'x - 03 [1080p]', status: 'complete', num_files: 1, total_size: 13_000_000 },
+       { id: 2, title: 'y - 03 [1080p]', status: 'complete', num_files: 1, total_size: 1_300_000_000 }],
+      SAM,
+    );
+    expect(ranked.map((r) => r.id)).toEqual([2]);
+  });
+});
+
+describe('findEpisodeFile with a release hint', () => {
+  it('skips tiny files that parse to the right episode', () => {
+    const files = [
+      { filename: 'S1/[Benno] Show - S01E03.mkv', size: 13_538_296 },
+      { filename: '[sam] Show - 03 [BD 1080p].mkv', size: 2_878_620_305 },
+    ];
+    expect(findEpisodeFile(files, 3, SAM)?.filename).toBe('[sam] Show - 03 [BD 1080p].mkv');
+  });
+
+  it('prefers a file with the same crc over other matches', () => {
+    const files = [
+      { filename: '[sam] Show - 03 [BD 1080p] [896F6762].mkv', size: 2_878_620_305 },
+      { filename: '[sam] Show - 03v2 [BD 1080p] [4A303FE1].mkv', size: 3_107_610_609 },
+    ];
+    expect(findEpisodeFile(files, 3, SAM)?.filename).toContain('4A303FE1');
   });
 });

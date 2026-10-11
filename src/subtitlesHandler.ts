@@ -7,6 +7,7 @@ import type { CacheStore } from './cache/cacheStore.js';
 import type { ExtractionQueue } from './queue/extractionQueue.js';
 import type { Config } from './config.js';
 import type { CacheKey, CacheProvider, ProviderResult, SubtitleCandidate } from './types.js';
+import type { ReleaseHint } from './releaseHint.js';
 import type { ExtractionParams } from './providers/extractionProvider.js';
 
 export interface DatasetHolder {
@@ -20,7 +21,7 @@ export interface SubtitlesHandlerDeps {
   queue: ExtractionQueue;
   config: Config;
   buildSubtitleUrl: (key: CacheKey) => string;
-  animetoshoProvider: (anidbId: number | null, episode: number, lang: string, opts?: { timeoutMs?: number; title?: string | null; feedBaseUrl?: string; storageBaseUrl?: string }) => Promise<ProviderResult>;
+  animetoshoProvider: (anidbId: number | null, episode: number, lang: string, opts?: { timeoutMs?: number; title?: string | null; release?: ReleaseHint; feedBaseUrl?: string; storageBaseUrl?: string }) => Promise<ProviderResult>;
   extractionProvider: (params: ExtractionParams) => Promise<ProviderResult>;
 }
 
@@ -42,12 +43,14 @@ function runProvider(
   anidbId: number | null,
   deps: SubtitlesHandlerDeps,
   title: string | null,
+  release?: ReleaseHint,
 ): Promise<ProviderResult> {
   if (provider === 'animetosho') {
     return deps
       .animetoshoProvider(anidbId, baseKey.episode, baseKey.lang, {
         timeoutMs: deps.config.providerTimeoutMs,
         title,
+        release,
       })
       .catch((err) => { console.warn(`[AnimeTosho] ${(err as Error).message}`); return { found: false, transient: true } as ProviderResult; });
   }
@@ -60,13 +63,14 @@ async function tryDatabaseTier(
   anidbId: number | null,
   deps: SubtitlesHandlerDeps,
   title: string | null,
+  release?: ReleaseHint,
 ): Promise<CacheProvider[]> {
   const hits: CacheProvider[] = [];
 
   await Promise.allSettled(providersToTry.map(async (provider) => {
     const key: CacheKey = { ...baseKey, provider };
     const existing = deps.cache.getInFlight(key);
-    const job = existing ?? runProvider(provider, baseKey, anidbId, deps, title);
+    const job = existing ?? runProvider(provider, baseKey, anidbId, deps, title, release);
     if (!existing) deps.cache.setInFlight(key, job);
 
     try {
@@ -95,6 +99,7 @@ async function resolveOneLanguage(
   deps: SubtitlesHandlerDeps,
   mediaType: string | undefined,
   title: string | null,
+  release?: ReleaseHint,
 ): Promise<CacheProvider[]> {
   const tier1Providers: CacheProvider[] = ['animetosho'];
   const readyProviders: CacheProvider[] = [];
@@ -122,7 +127,7 @@ async function resolveOneLanguage(
   // 1. Fast Cache Path: If any Tier 1 provider is already ready, check if extraction is also ready
   if (readyProviders.length > 0) {
     if (toTry.length > 0) {
-      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
+      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title, release);
       readyProviders.push(...hits);
     }
     extractionCached = deps.cache.get(extractionKey);
@@ -161,7 +166,7 @@ async function resolveOneLanguage(
     }
 
     if (toTry.length > 0) {
-      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
+      const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title, release);
       readyProviders.push(...hits);
     }
 
@@ -173,7 +178,7 @@ async function resolveOneLanguage(
 
   // 3. Sequential Fallback Path (ENABLE_CONCURRENT_EXTRACTION=false)
   if (toTry.length > 0) {
-    const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title);
+    const hits = await tryDatabaseTier(baseKey, toTry, anidbId, deps, title, release);
     readyProviders.push(...hits);
   }
 
@@ -252,6 +257,7 @@ export async function handleSubtitlesRequest(
   rawId: string,
   deps: SubtitlesHandlerDeps,
   mediaType?: string,
+  release?: ReleaseHint,
 ): Promise<{ subtitles: SubtitleCandidate[] }> {
   const parsed = parseSubtitleRequestId(rawId);
   const ids = resolveIds(parsed.contentId, deps.dataset.current, deps.episodeMapping, parsed.season, parsed.episode);
@@ -266,7 +272,7 @@ export async function handleSubtitlesRequest(
   const results = await Promise.all(
     deps.config.subtitleLanguages.map(async (lang) => {
       const baseKey = { anilistId, episode, lang };
-      const hitProviders = await resolveOneLanguage(baseKey, ids.anidbId, parsed, deps, mediaType, ids.title ?? null);
+      const hitProviders = await resolveOneLanguage(baseKey, ids.anidbId, parsed, deps, mediaType, ids.title ?? null, release);
       return hitProviders.map((provider): SubtitleCandidate => ({
         lang,
         provider,

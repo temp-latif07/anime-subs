@@ -71,6 +71,16 @@ describe('handleSubtitlesRequest', () => {
     expect(result.subtitles.map((s) => s.provider).sort()).toEqual(['animetosho', 'extraction']);
   });
 
+  it('passes the playing file hint through to the animetosho provider', async () => {
+    deps.animetoshoProvider = vi.fn(async () => ({ found: true, vttContent: 'WEBVTT\n\n1\ntosho hit' }));
+    const release = { filename: '[sam] Show - 05 [BD 1080p].mkv', size: 123456789 };
+    await handleSubtitlesRequest('kitsu:46474:1:5', deps, undefined, release);
+    expect(deps.animetoshoProvider).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(),
+      expect.objectContaining({ release }),
+    );
+  });
+
   it('initiates Tier 1 and extraction concurrently on uncached request, returning both tracks', async () => {
     deps.config = { ...baseConfig, enableConcurrentExtraction: true };
     deps.extractionProvider = vi.fn(() => new Promise<ProviderResult>(() => {}));

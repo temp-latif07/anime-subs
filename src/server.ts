@@ -1,6 +1,7 @@
 import express, { type Express } from 'express';
 import { readFileSync, existsSync } from 'node:fs';
 import { manifest } from './manifest.js';
+import { parseReleaseHint } from './releaseHint.js';
 import { handleSubtitlesRequest, type SubtitlesHandlerDeps } from './subtitlesHandler.js';
 import type { CacheStore } from './cache/cacheStore.js';
 import type { CacheProvider } from './types.js';
@@ -41,7 +42,8 @@ export function createServer(handlerDeps: SubtitlesHandlerDeps, cache: CacheStor
       const typeParam = Array.isArray(req.params.type) ? req.params.type[0] : req.params.type;
       const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
       const rawId = decodeURIComponent(idParam);
-      const result = await handleSubtitlesRequest(rawId, handlerDeps, typeParam);
+      const extraParam = Array.isArray(req.params.extra) ? req.params.extra[0] : req.params.extra;
+      const result = await handleSubtitlesRequest(rawId, handlerDeps, typeParam, parseReleaseHint(extraParam));
       const host = req.get('host');
       const protocol = req.protocol;
       const origin = host ? `${protocol}://${host}` : '';

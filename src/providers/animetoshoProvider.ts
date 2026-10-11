@@ -3,12 +3,14 @@ import { decompressXz } from '../ffmpeg/xz.js';
 import { convertToVtt } from '../ffmpeg/extract.js';
 import { isAcceptableSubtitle } from '../ffmpeg/vttUtils.js';
 import type { ProviderResult } from '../types.js';
+import type { ReleaseHint } from '../releaseHint.js';
 
 interface ToshoSearchResult {
   id: number;
   title: string;
   status: string;
   num_files: number;
+  total_size?: number;
 }
 
 export interface ToshoAttachment {
@@ -44,15 +46,22 @@ export function isForcedOrSignsAttachment(info?: ToshoAttachment['info'] | Tosho
   return text.includes('forced') || text.includes('sign') || text.includes('song');
 }
 
-// Mini anime, PVs and creditless OP/ED releases share the series anidb id and
-// have their own "episode N", so they can be mistaken for the real episode.
+// Mini anime, PVs, trailers and creditless OP/ED releases share the series
+// anidb id and have their own "episode N", so they can be mistaken for the
+// real episode. PV/CM only count when they look like a release tag (after a
+// dash or opening bracket, or followed by a number), so series names that
+// merely contain those words are kept.
 export function isNonEpisodeRelease(title: string): boolean {
-  return /mini[\s-]?anime|\bNC(?:OP|ED)\d*\b|\bPV\s*\d*\b|\bCM\b/i.test(title);
+  return /mini[\s-]?anime|\bNC(?:OP|ED)\d*\b|creditless|\btrailer\b|[-\u2013[(]\s*(?:PV|CM)\b|\bPV\s*\d+\b/i.test(title);
 }
+
+const EXTRAS_DIR = /(?:^|[\\/])(?:extras?|specials?|bonus|nc(?:op|ed)s?|creditless)[\\/]/i;
 
 interface ToshoFile {
   filename?: string;
   name?: string;
+  size?: number | null;
+  crc32?: string | null;
   attachments?: ToshoAttachment[];
 }
 
@@ -71,12 +80,77 @@ export const EPISODE_PATTERNS = [
   /-\s*(\d{1,4})(?:\.[a-z0-9]+)?\s*$/i,
 ];
 
+// "01 ~ 24", "01-24", "(01-12)": a batch, not a single episode.
+function hasEpisodeRange(title: string): boolean {
+  for (const m of title.matchAll(/\b(\d{1,4})\s*~\s*(\d{1,4})\b|\b(\d{1,4})-(\d{1,4})\b/g)) {
+    const from = parseInt(m[1] ?? m[3], 10);
+    const to = parseInt(m[2] ?? m[4], 10);
+    if (to > from) return true;
+  }
+  return false;
+}
+
+const NON_EPISODE_NUMBERS = new Set([480, 576, 720, 1080, 2160]);
+
+function isResolutionOrYear(n: number): boolean {
+  return NON_EPISODE_NUMBERS.has(n) || (n >= 1900 && n <= 2099);
+}
+
 export function parseEpisodeNumber(title: string): number | null {
+  if (hasEpisodeRange(title)) return null;
   for (const pattern of EPISODE_PATTERNS) {
     const match = title.match(pattern);
-    if (match) return parseInt(match[1], 10);
+    if (!match) continue;
+    const n = parseInt(match[1], 10);
+    if (isResolutionOrYear(n)) continue;
+    return n;
   }
   return null;
+}
+
+// Files much smaller than the one being played are shorts or previews, not
+// the same episode. The floor is loose so lower-quality encodes still pass.
+const MIN_SIZE_RATIO = 0.05;
+
+export function isPlausibleSize(size: number | null | undefined, playingSize: number | undefined): boolean {
+  if (!size || !playingSize) return true;
+  return size >= playingSize * MIN_SIZE_RATIO;
+}
+
+export function parseReleaseGroup(name: string): string | null {
+  const m = name.match(/^\s*(?:.*[\\/])?\[([^\]]+)\]/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+export function parseCrc(name: string): string | null {
+  const m = name.match(/\[([0-9A-Fa-f]{8})\]/);
+  return m ? m[1].toUpperCase() : null;
+}
+
+export function findEpisodeFile(files: ToshoFile[], episode: number, release?: ReleaseHint): ToshoFile | undefined {
+  const matches = files.filter((f) => {
+    const fname = f.filename ?? f.name ?? '';
+    if (isNonEpisodeRelease(fname) || EXTRAS_DIR.test(fname)) return false;
+    if (!isPlausibleSize(f.size, release?.size)) return false;
+    return parseEpisodeNumber(fname) === episode;
+  });
+  const playingCrc = release?.filename ? parseCrc(release.filename) : null;
+  const exact = matches.find((f) => {
+    const fname = f.filename ?? f.name ?? '';
+    return (playingCrc !== null && (f.crc32?.toUpperCase() === playingCrc || parseCrc(fname) === playingCrc))
+      || (!!release?.size && f.size === release.size);
+  });
+  return exact ?? matches[0];
+}
+
+// Drops candidates that cannot be the playing file and moves releases from the
+// same group first. Array.sort is stable, so the API order is kept otherwise.
+export function rankCandidates(candidates: ToshoSearchResult[], release?: ReleaseHint): ToshoSearchResult[] {
+  if (!release) return candidates;
+  const group = release.filename ? parseReleaseGroup(release.filename) : null;
+  const plausible = candidates.filter((c) => c.num_files !== 1 || isPlausibleSize(c.total_size, release.size));
+  const score = (c: ToshoSearchResult) => (group && parseReleaseGroup(c.title) === group ? 1 : 0);
+  return [...plausible].sort((a, b) => score(b) - score(a));
 }
 
 function buildAttachmentUrl(
@@ -99,6 +173,7 @@ export interface AnimeToshoOptions {
   storageBaseUrl?: string;
   timeoutMs?: number;
   title?: string | null;
+  release?: ReleaseHint;
 }
 
 async function resolveSubtitleFromCandidates(
@@ -108,9 +183,13 @@ async function resolveSubtitleFromCandidates(
   feedBaseUrl: string,
   storageBaseUrl: string,
   timeoutMs: number,
+  release?: ReleaseHint,
   maxDetailFetches: number = 5,
 ): Promise<ProviderResult | null> {
-  const completeCandidates = candidates.filter((r) => r.status === 'complete' && !isNonEpisodeRelease(r.title));
+  const completeCandidates = rankCandidates(
+    candidates.filter((r) => r.status === 'complete' && !isNonEpisodeRelease(r.title)),
+    release,
+  );
   let detailFetches = 0;
 
   for (const candidate of completeCandidates) {
@@ -139,10 +218,7 @@ async function resolveSubtitleFromCandidates(
           { timeoutMs },
         );
         if (!detail.files || detail.files.length === 0) continue;
-        targetFile = detail.files.find((f) => {
-          const fname = f.filename ?? f.name ?? '';
-          return parseEpisodeNumber(fname) === episode;
-        });
+        targetFile = findEpisodeFile(detail.files, episode, release);
         if (!targetFile) continue;
       } else {
         continue;
@@ -211,8 +287,8 @@ export async function findAnimeToshoSubtitle(
   lang: string,
   opts: AnimeToshoOptions = {},
 ): Promise<ProviderResult> {
-  const feedBaseUrl = (opts.feedBaseUrl ?? 'https://feed.animetosho.xyz').replace(/\/+$/, '');
-  const storageBaseUrl = (opts.storageBaseUrl ?? 'https://storage.animetosho.xyz').replace(/\/+$/, '');
+  const feedBaseUrl = (opts.feedBaseUrl ?? 'https://feed.animetosho.net').replace(/\/+$/, '');
+  const storageBaseUrl = (opts.storageBaseUrl ?? 'https://storage.animetosho.net').replace(/\/+$/, '');
   const timeoutMs = opts.timeoutMs ?? 3500;
 
   const paddedEp = String(episode).padStart(2, '0');
@@ -244,7 +320,7 @@ export async function findAnimeToshoSubtitle(
     }
     const candidates = Array.from(candidateMap.values());
     if (candidates.length > 0) {
-      const match = await resolveSubtitleFromCandidates(candidates, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      const match = await resolveSubtitleFromCandidates(candidates, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs, opts.release);
       if (match) return match;
     }
 
@@ -256,7 +332,7 @@ export async function findAnimeToshoSubtitle(
       { timeoutMs },
     );
     if (broadResults.length > 0) {
-      const match = await resolveSubtitleFromCandidates(broadResults, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+      const match = await resolveSubtitleFromCandidates(broadResults, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs, opts.release);
       if (match) return match;
     }
   }
@@ -291,7 +367,7 @@ export async function findAnimeToshoSubtitle(
       }
       const titleCandidates = Array.from(titleCandidateMap.values());
       if (titleCandidates.length > 0) {
-        const match = await resolveSubtitleFromCandidates(titleCandidates, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs);
+        const match = await resolveSubtitleFromCandidates(titleCandidates, episode, lang, feedBaseUrl, storageBaseUrl, timeoutMs, opts.release);
         if (match) return match;
       }
     }
